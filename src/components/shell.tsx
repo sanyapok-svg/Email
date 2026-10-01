@@ -1,7 +1,7 @@
 import { Nav } from "@/components/nav";
 import { logout } from "@/server/auth";
 
-export function Shell({ children }: { children: React.ReactNode }) {
+export function Shell({ children, pathname = "/" }: { children: React.ReactNode; pathname?: string }) {
   return (
     <div className="min-h-screen md:grid md:grid-cols-[240px_1fr]">
       <aside className="flex flex-col bg-pine text-paper">
@@ -9,7 +9,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
           <p className="text-[11px] uppercase tracking-[0.18em] text-white/50">Yandex 360</p>
           <p className="text-xl font-semibold">Входящие</p>
         </div>
-        <Nav />
+        <Nav pathname={pathname} />
         <form action={logout} className="mt-auto p-4">
           <button className="secondary w-full" type="submit">
             Выйти
