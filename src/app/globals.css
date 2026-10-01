@@ -1,0 +1,61 @@
+@import "tailwindcss";
+
+@theme {
+  --color-paper: #f3efe6;
+  --color-ink: #1c1915;
+  --color-pine: #1b2822;
+  --color-moss: #2f6f4e;
+  --color-clay: #b85c38;
+  --color-card: #fffdf8;
+  --color-line: #e4d9c8;
+  --color-muted: #6d6458;
+}
+
+body {
+  background: var(--color-paper);
+  color: var(--color-ink);
+  font-family: "Segoe UI", "PT Sans", "Helvetica Neue", sans-serif;
+}
+
+input, select, textarea {
+  background: white;
+  border: 1px solid var(--color-line);
+  border-radius: 0.5rem;
+  padding: 0.5rem 0.7rem;
+  width: 100%;
+}
+
+button, .button {
+  background: var(--color-pine);
+  color: #f6f1e8;
+  border-radius: 0.55rem;
+  padding: 0.5rem 0.85rem;
+  font-size: 0.92rem;
+}
+
+button.secondary, .button.secondary {
+  background: transparent;
+  color: var(--color-ink);
+  border: 1px solid var(--color-line);
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--color-card);
+}
+
+th, td {
+  border-bottom: 1px solid var(--color-line);
+  padding: 0.65rem 0.75rem;
+  text-align: left;
+  vertical-align: top;
+  font-size: 0.92rem;
+}
+
+th {
+  font-size: 0.75rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-muted);
+}

@@ -1,0 +1,297 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Mailbox {
+  id                    String    @id @default(cuid())
+  name                  String
+  address               String
+  displayAddress        String?   @map("display_address")
+  active                Boolean   @default(false)
+  timezone              String    @default("Europe/Moscow")
+  imapHost              String    @default("imap.yandex.com") @map("imap_host")
+  imapPort              Int       @default(993) @map("imap_port")
+  imapSecure            Boolean   @default(true) @map("imap_secure")
+  imapUser              String    @map("imap_user")
+  imapPasswordEnc       String    @map("imap_password_enc")
+  smtpHost              String    @default("smtp.yandex.com") @map("smtp_host")
+  smtpPort              Int       @default(465) @map("smtp_port")
+  smtpSecure            Boolean   @default(true) @map("smtp_secure")
+  smtpUser              String?   @map("smtp_user")
+  smtpPasswordEnc       String?   @map("smtp_password_enc")
+  smtpFromName          String?   @map("smtp_from_name")
+  smtpFromAddress       String?   @map("smtp_from_address")
+  repliesEnabled        Boolean   @default(false) @map("replies_enabled")
+  repliesPaused         Boolean   @default(false) @map("replies_paused")
+  batchSize             Int       @default(8) @map("batch_size")
+  pollIntervalSec       Int       @default(300) @map("poll_interval_sec")
+  bodyCharLimit         Int       @default(150000) @map("body_char_limit")
+  entityListLimit       Int       @default(40) @map("entity_list_limit")
+  workDays              Json      @default("[1,2,3,4,5]") @map("work_days")
+  workIntervals         Json      @default("[{\"start\":\"09:00\",\"end\":\"18:00\"}]") @map("work_intervals")
+  holidays              Json      @default("[]")
+  notifyOutsidePolicy   String    @default("defer") @map("notify_outside_policy")
+  replyOutsidePolicy    String    @default("send_now") @map("reply_outside_policy")
+  dryRun                Boolean   @default(false) @map("dry_run")
+  notifyPerHour         Int       @default(30) @map("notify_per_hour")
+  replyPerHour          Int       @default(10) @map("reply_per_hour")
+  replyPerRecipientDay  Int       @default(3) @map("reply_per_recipient_day")
+  senderPauseMinutes    Int       @default(60) @map("sender_pause_minutes")
+  subjectPauseMinutes   Int       @default(0) @map("subject_pause_minutes")
+  domainPauseMinutes    Int       @default(0) @map("domain_pause_minutes")
+  autoReplyBlocklist    Json      @default("[\"mailer-daemon\",\"postmaster\",\"no-reply\",\"noreply\",\"do-not-reply\",\"donotreply\",\"notification\",\"notifications\",\"newsletter\",\"unsubscribe\"]") @map("auto_reply_blocklist")
+  uidValidity           BigInt?   @map("uid_validity")
+  lastUid               BigInt?   @map("last_uid")
+  initialized           Boolean   @default(false)
+  lastCheckedAt         DateTime? @map("last_checked_at")
+  consecutiveErrors     Int       @default(0) @map("consecutive_errors")
+  lastError             String?   @map("last_error") @db.Text
+  smtpLastError         String?   @map("smtp_last_error") @db.Text
+  createdAt             DateTime  @default(now()) @map("created_at")
+  updatedAt             DateTime  @updatedAt @map("updated_at")
+
+  rules          Rule[]
+  messages       ProcessedMessage[]
+  notifications  Notification[]
+  replies        OutboundReply[]
+  templates      ReplyTemplate[]
+  metrics        DailyMetric[]
+
+  @@map("mailboxes")
+}
+
+model Rule {
+  id         String   @id @default(cuid())
+  mailboxId  String   @map("mailbox_id")
+  name       String
+  type       String
+  position   Int
+  active     Boolean  @default(true)
+  category   String?
+  conditions Json
+  action     Json
+  dryRun     Boolean  @default(false) @map("dry_run")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  mailbox       Mailbox            @relation(fields: [mailboxId], references: [id], onDelete: Cascade)
+  messages      ProcessedMessage[]
+  notifications Notification[]
+  replies       OutboundReply[]
+
+  @@index([mailboxId, position])
+  @@map("rules")
+}
+
+model ReplyTemplate {
+  id        String   @id @default(cuid())
+  mailboxId String   @map("mailbox_id")
+  name      String
+  bodyText  String   @map("body_text") @db.Text
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  mailbox Mailbox         @relation(fields: [mailboxId], references: [id], onDelete: Cascade)
+  replies OutboundReply[]
+
+  @@index([mailboxId])
+  @@map("reply_templates")
+}
+
+model ProcessedMessage {
+  id                      String    @id @default(cuid())
+  mailboxId               String    @map("mailbox_id")
+  uid                     BigInt
+  uidValidity             BigInt    @map("uid_validity")
+  messageIdHeader         String?   @map("message_id_header")
+  receivedAt              DateTime  @map("received_at")
+  sentAt                  DateTime? @map("sent_at")
+  subject                 String    @default("")
+  subjectNormalized       String    @default("") @map("subject_normalized")
+  fromEmail               String    @default("") @map("from_email")
+  fromDisplayName         String    @default("") @map("from_display_name")
+  fromDomain              String    @default("") @map("from_domain")
+  fromTld                 String    @default("") @map("from_tld")
+  toRecipients            String[]  @default([]) @map("to_recipients")
+  ccRecipients            String[]  @default([]) @map("cc_recipients")
+  replyTo                 String[]  @default([]) @map("reply_to")
+  sizeBytes               Int       @default(0) @map("size_bytes")
+  attachmentCount         Int       @default(0) @map("attachment_count")
+  attachmentNames         String[]  @default([]) @map("attachment_names")
+  attachmentExtensions    String[]  @default([]) @map("attachment_extensions")
+  headersSnapshot         Json      @default("{}") @map("headers_snapshot")
+  bodyFullText            String    @default("") @map("body_full_text") @db.Text
+  bodyNewText             String    @default("") @map("body_new_text") @db.Text
+  bodyPreview             String    @default("") @map("body_preview") @db.Text
+  bodyTruncated           Boolean   @default(false) @map("body_truncated")
+  bodyUnavailable         Boolean   @default(false) @map("body_unavailable")
+  bodyError               String?   @map("body_error")
+  quoteSplitConfidence    String    @default("high") @map("quote_split_confidence")
+  language                String    @default("unknown")
+  languageConfidence      Float     @default(0) @map("language_confidence")
+  sentiment               String    @default("neutral")
+  sentimentScore          Float     @default(0) @map("sentiment_score")
+  urgencyLevel            String    @default("normal") @map("urgency_level")
+  urgencyScore            Float     @default(0) @map("urgency_score")
+  phonesRaw               String[]  @default([]) @map("phones_raw")
+  phonesNormalized        String[]  @default([]) @map("phones_normalized")
+  emails                  String[]  @default([])
+  urls                    String[]  @default([])
+  urlDomains              String[]  @default([]) @map("url_domains")
+  urlDomainMismatch       Boolean   @default(false) @map("url_domain_mismatch")
+  dates                   Json      @default("[]")
+  deadlines               Json      @default("[]")
+  earliestDeadline        DateTime? @map("earliest_deadline")
+  amounts                 Json      @default("[]")
+  currencies              String[]  @default([])
+  contractNumbers         String[]  @default([]) @map("contract_numbers")
+  invoiceNumbers          String[]  @default([]) @map("invoice_numbers")
+  actNumbers              String[]  @default([]) @map("act_numbers")
+  ticketIds               String[]  @default([]) @map("ticket_ids")
+  innNumbers              String[]  @default([]) @map("inn_numbers")
+  kppNumbers              String[]  @default([]) @map("kpp_numbers")
+  ogrnNumbers             String[]  @default([]) @map("ogrn_numbers")
+  bankAccountCandidates   String[]  @default([]) @map("bank_account_candidates")
+  entityListsTruncated    Boolean   @default(false) @map("entity_lists_truncated")
+  decision                String
+  matchedRuleId           String?   @map("matched_rule_id")
+  errorCode               String?   @map("error_code")
+  errorMessage            String?   @map("error_message") @db.Text
+  searchDocument          String    @default("") @map("search_document") @db.Text
+  processedAt             DateTime  @default(now()) @map("processed_at")
+  createdAt               DateTime  @default(now()) @map("created_at")
+
+  mailbox       Mailbox          @relation(fields: [mailboxId], references: [id], onDelete: Cascade)
+  matchedRule   Rule?            @relation(fields: [matchedRuleId], references: [id], onDelete: SetNull)
+  notifications Notification[]
+  replies       OutboundReply[]
+
+  @@unique([mailboxId, uid, uidValidity])
+  @@index([mailboxId, receivedAt])
+  @@index([decision])
+  @@index([fromEmail])
+  @@index([fromDomain])
+  @@index([messageIdHeader])
+  @@map("processed_messages")
+}
+
+model Notification {
+  id              String    @id @default(cuid())
+  mailboxId       String    @map("mailbox_id")
+  messageId       String    @map("message_id")
+  ruleId          String?   @map("rule_id")
+  idempotencyKey  String    @unique @map("idempotency_key")
+  status          String
+  priority        String
+  category        String?
+  responseDueAt   DateTime? @map("response_due_at")
+  overdue         Boolean   @default(false)
+  dueRisk         Boolean   @default(false) @map("due_risk")
+  payload         Json
+  scheduledAt     DateTime? @map("scheduled_at")
+  attempts        Int       @default(0)
+  maxAttempts     Int       @default(5) @map("max_attempts")
+  nextAttemptAt   DateTime? @map("next_attempt_at")
+  lastError       String?   @map("last_error") @db.Text
+  sentAt          DateTime? @map("sent_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  mailbox Mailbox          @relation(fields: [mailboxId], references: [id], onDelete: Cascade)
+  message ProcessedMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  rule    Rule?            @relation(fields: [ruleId], references: [id], onDelete: SetNull)
+
+  @@index([status, nextAttemptAt])
+  @@index([mailboxId, createdAt])
+  @@map("notifications")
+}
+
+model OutboundReply {
+  id              String    @id @default(cuid())
+  mailboxId       String    @map("mailbox_id")
+  messageId       String    @map("message_id")
+  ruleId          String?   @map("rule_id")
+  templateId      String?   @map("template_id")
+  kind            String
+  idempotencyKey  String    @unique @map("idempotency_key")
+  status          String
+  toAddress       String    @map("to_address")
+  subject         String
+  bodyText        String    @map("body_text") @db.Text
+  inReplyTo       String?   @map("in_reply_to")
+  references      String?   @map("references_header") @db.Text
+  warnings        Json      @default("[]")
+  suppressedReason String?  @map("suppressed_reason")
+  scheduledAt     DateTime? @map("scheduled_at")
+  attempts        Int       @default(0)
+  maxAttempts     Int       @default(5) @map("max_attempts")
+  nextAttemptAt   DateTime? @map("next_attempt_at")
+  lastError       String?   @map("last_error") @db.Text
+  sentAt          DateTime? @map("sent_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  mailbox  Mailbox          @relation(fields: [mailboxId], references: [id], onDelete: Cascade)
+  message  ProcessedMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  rule     Rule?            @relation(fields: [ruleId], references: [id], onDelete: SetNull)
+  template ReplyTemplate?   @relation(fields: [templateId], references: [id], onDelete: SetNull)
+
+  @@index([status, nextAttemptAt])
+  @@index([mailboxId, createdAt])
+  @@map("outbound_replies")
+}
+
+model B24Recipient {
+  id         String   @id @default(cuid())
+  name       String
+  externalId String   @map("external_id")
+  active     Boolean  @default(true)
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  @@map("b24_recipients")
+}
+
+model IntegrationConfig {
+  id                 String   @id @default("default")
+  b24Mode            String   @default("mock") @map("b24_mode")
+  webhookUrlEnc      String?  @map("webhook_url_enc")
+  globalDryRun       Boolean  @default(true) @map("global_dry_run")
+  retentionDays      Int?     @map("retention_days")
+  notifyMaxAttempts  Int      @default(5) @map("notify_max_attempts")
+  replyMaxAttempts   Int      @default(5) @map("reply_max_attempts")
+  includeBodyPreview Boolean  @default(false) @map("include_body_preview")
+  previewChars       Int      @default(280) @map("preview_chars")
+  globalMessageDedupe Boolean @default(false) @map("global_message_dedupe")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+
+  @@map("integration_config")
+}
+
+model DailyMetric {
+  id        String   @id @default(cuid())
+  day       DateTime @db.Date
+  mailboxId String   @map("mailbox_id")
+  counters  Json
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  mailbox Mailbox @relation(fields: [mailboxId], references: [id], onDelete: Cascade)
+
+  @@unique([day, mailboxId])
+  @@map("daily_metrics")
+}
+
+model SchedulerLock {
+  id          String   @id
+  lockedUntil DateTime @map("locked_until")
+  owner       String
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@map("scheduler_locks")
+}

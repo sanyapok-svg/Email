@@ -1,0 +1,14 @@
+node_modules
+.next
+out
+dist
+.vercel
+.env
+.env.local
+.env*.local
+*.log
+coverage
+prisma/*.db
+prisma/*.db-journal
+.DS_Store
+tsconfig.tsbuildinfo
