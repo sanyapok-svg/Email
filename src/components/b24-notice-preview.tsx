@@ -43,7 +43,7 @@ export function B24NoticePreview({
     <section className="rounded-xl border border-line bg-card p-4">
       <h2 className="font-semibold">Как это получит пользователь в Битрикс24</h2>
       <p className="mt-1 text-sm text-muted">
-        Пример на письме «{EXAMPLE_SUBJECT}». Такой текст увидит каждый выбранный пользователь в колокольчике уведомлений.
+        Пример на письме «{EXAMPLE_SUBJECT}». Такой текст придёт каждому выбранному пользователю личным сообщением в мессенджере от автора веб-хука.
       </p>
       {!enabled ? (
         <p className="mt-4 text-sm">Для этого правила уведомление в Битрикс24 не создаётся.</p>
@@ -52,23 +52,17 @@ export function B24NoticePreview({
       ) : (
         <div className="mt-4 overflow-hidden rounded-2xl border border-[#d5dde3] bg-white shadow-sm">
           <div className="flex items-center justify-between bg-[#eef2f4] px-4 py-2.5">
-            <span className="text-sm font-semibold text-[#333]">Уведомления</span>
-            <span className="text-xs text-[#828b95]">Битрикс24</span>
+            <span className="text-sm font-semibold text-[#333]">Мессенджер</span>
+            <span className="text-xs text-[#828b95]">от автора веб-хука</span>
           </div>
-          <div className="flex gap-3 px-4 py-3">
-            <div
-              className="grid h-10 w-10 shrink-0 place-items-center rounded-full text-sm font-semibold text-white"
-              style={{ background: PRIORITY_COLOR[priority] || PRIORITY_COLOR.normal }}
-            >
-              Вх
+          <div className="bg-[#f1f4f6] px-4 py-3">
+            <div className="ml-auto max-w-[92%] rounded-2xl rounded-br-md bg-white px-3 py-2 shadow-sm">
+              <p className="text-xs font-semibold" style={{ color: PRIORITY_COLOR[priority] || PRIORITY_COLOR.normal }}>
+                Автор веб-хука · {priorityLabel(priority)}
+              </p>
+              <p className="mt-1 whitespace-pre-line text-sm leading-5 text-[#333]">{text}</p>
             </div>
-            <div className="min-w-0 flex-1">
-              <div className="flex items-start justify-between gap-3">
-                <p className="text-sm font-semibold text-[#333]">Входящие · {priorityLabel(priority)}</p>
-                <p className="shrink-0 text-xs text-[#a8adb4]">сейчас</p>
-              </div>
-              <p className="mt-2 whitespace-pre-line text-sm leading-5 text-[#525c69]">{text}</p>
-              <ul className="mt-3 grid gap-1 border-t border-[#e6ebef] pt-3 text-xs text-[#525c69]">
+            <ul className="mt-3 grid gap-1 text-xs text-[#525c69]">
                 {recipients.map((person) => (
                   <li key={person.id}>
                     {person.name}
@@ -76,7 +70,6 @@ export function B24NoticePreview({
                   </li>
                 ))}
               </ul>
-            </div>
           </div>
         </div>
       )}

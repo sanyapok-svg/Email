@@ -1,6 +1,7 @@
 import { DateTime } from "luxon";
 import { describe, expect, it } from "vitest";
 import { analyzeText } from "@/lib/analysis/analyze";
+import { bitrixMethodUrl, bitrixUserIds } from "@/lib/b24/adapter";
 import { decryptSecret, encryptSecret } from "@/lib/crypto/secrets";
 import { extractEntities } from "@/lib/entities/extract";
 import { isWorkingMoment, nextWorkingStart, planByWorkingHours } from "@/lib/hours/schedule";
@@ -251,3 +252,15 @@ function context() {
     repliesEnabled: true,
   };
 }
+
+describe("bitrix webhook", () => {
+  it("calls the system notification method and ignores the sample method in the saved url", () => {
+    const url = bitrixMethodUrl("https://crm.example/rest/46/abcdefghijklmnop/profile.json", "im.message.add");
+    expect(url).toBe("https://crm.example/rest/46/abcdefghijklmnop/im.message.add.json");
+    expect(bitrixMethodUrl("https://crm.example/hook", "im.message.add")).toBeNull();
+  });
+
+  it("reads numeric bitrix user ids from the payload", () => {
+    expect(bitrixUserIds({ b24Users: [{ externalId: "7" }, { externalId: "7" }, { externalId: "abc" }] })).toEqual(["7"]);
+  });
+});

@@ -8,6 +8,7 @@ import type { NormalizedMessage } from "@/lib/mail/model";
 import { bumpMetrics } from "@/lib/metrics/counters";
 import { withLock } from "@/lib/locks";
 import { decideMessage, type DecideContext } from "@/lib/orchestration/decide";
+import { dispatchQueues } from "@/lib/queues/dispatch";
 import { firstMatchingRule } from "@/lib/rules/engine";
 import { parsePolicy, parseSchedule, parseStoredRule } from "@/lib/rules/parse";
 import { getIntegrationConfig } from "@/lib/settings";
@@ -32,6 +33,7 @@ export async function pollMailbox(mailboxId: string, options: { force?: boolean 
       const interval = Math.max(60, mailbox.pollIntervalSec) * 1000;
       if (Date.now() - mailbox.lastCheckedAt.getTime() < interval) return;
     }
+    let deliver = false;
     const password = decryptSecret(mailbox.imapPasswordEnc);
     const connector = new ImapConnector({
       host: mailbox.imapHost,
@@ -40,6 +42,7 @@ export async function pollMailbox(mailboxId: string, options: { force?: boolean 
       user: mailbox.imapUser,
       password,
     });
+    deliver = true;
     try {
       await connector.connect();
       const status = await connector.examineInbox();
@@ -76,6 +79,13 @@ export async function pollMailbox(mailboxId: string, options: { force?: boolean 
       logEvent("error", "imap.poll_failed", { mailboxId: mailbox.id, message });
     } finally {
       await connector.close();
+      if (deliver) {
+        try {
+          await dispatchQueues();
+        } catch (error) {
+          logEvent("error", "queue.dispatch_failed", { message: safeError(error, []) });
+        }
+      }
     }
   });
 }
