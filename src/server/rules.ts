@@ -9,6 +9,7 @@ import { emptyMessage, type NormalizedMessage } from "@/lib/mail/model";
 import { decideMessage } from "@/lib/orchestration/decide";
 import { normalizeAction, parseSchedule, parseStoredRule } from "@/lib/rules/parse";
 import type { ConditionGroup } from "@/lib/rules/types";
+import { withNotice } from "@/lib/http/notice";
 import { getIntegrationConfig } from "@/lib/settings";
 
 export async function saveRule(formData: FormData) {
@@ -40,7 +41,7 @@ export async function saveRule(formData: FormData) {
     dryRun: formData.get("dryRun") === "on",
   };
   const saved = id ? await prisma.rule.update({ where: { id }, data }) : await prisma.rule.create({ data });
-  redirect(`/rules/${saved.id}?notice=Сохранено`);
+  redirect(withNotice(`/rules/${saved.id}`, "Сохранено"));
 }
 
 export async function moveRule(formData: FormData) {

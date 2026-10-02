@@ -2,6 +2,7 @@ const LINKS = [
   ["/", "Обзор"],
   ["/mailboxes", "Ящики"],
   ["/rules", "Правила"],
+  ["/users", "Пользователи"],
   ["/messages", "Письма"],
   ["/notifications", "Уведомления"],
   ["/replies", "Ответы"],

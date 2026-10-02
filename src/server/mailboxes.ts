@@ -7,6 +7,7 @@ import { prisma } from "@/lib/db";
 import { testImapConnection, safeError } from "@/lib/imap/connector";
 import { pollMailbox } from "@/lib/orchestration/poll";
 import { starterRules } from "@/lib/rules/starter";
+import { withNotice } from "@/lib/http/notice";
 import { verifySmtp } from "@/lib/smtp/sender";
 
 export async function saveMailbox(formData: FormData) {
@@ -15,7 +16,7 @@ export async function saveMailbox(formData: FormData) {
   const existing = id ? await prisma.mailbox.findUnique({ where: { id } }) : null;
   const imapPassword = String(formData.get("imapPassword") || "");
   const smtpPassword = String(formData.get("smtpPassword") || "");
-  if (!existing && !imapPassword) redirect("/mailboxes/new?notice=Нужен пароль IMAP");
+  if (!existing && !imapPassword) redirect(withNotice("/mailboxes/new", "Нужен пароль IMAP"));
   const data = {
     name: required(formData, "name"),
     address: required(formData, "address").toLowerCase(),
@@ -56,14 +57,14 @@ export async function saveMailbox(formData: FormData) {
   const saved = existing
     ? await prisma.mailbox.update({ where: { id: existing.id }, data })
     : await prisma.mailbox.create({ data });
-  redirect(`/mailboxes/${saved.id}?notice=Сохранено`);
+  redirect(withNotice(`/mailboxes/${saved.id}`, "Сохранено"));
 }
 
 export async function testMailboxImap(formData: FormData) {
   await requireUser();
   const id = String(formData.get("id") || "");
   const mailbox = await prisma.mailbox.findUnique({ where: { id } });
-  if (!mailbox) redirect("/mailboxes?notice=Ящик не найден");
+  if (!mailbox) redirect(withNotice("/mailboxes", "Ящик не найден"));
   try {
     const { decryptSecret } = await import("@/lib/crypto/secrets");
     const status = await testImapConnection({
@@ -73,9 +74,10 @@ export async function testMailboxImap(formData: FormData) {
       user: mailbox.imapUser,
       password: decryptSecret(mailbox.imapPasswordEnc),
     });
-    redirect(`/mailboxes/${id}?notice=${encodeURIComponent(`IMAP в порядке. UIDVALIDITY ${status.uidValidity}, следующий UID ${status.uidNext}`)}`);
+    redirect(withNotice(`/mailboxes/${id}`, `IMAP в порядке. UIDVALIDITY ${status.uidValidity}, следующий UID ${status.uidNext}`));
   } catch (error) {
-    redirect(`/mailboxes/${id}?notice=${encodeURIComponent(safeError(error, []))}`);
+    rethrowRedirect(error);
+    redirect(withNotice(`/mailboxes/${id}`, safeError(error, [])));
   }
 }
 
@@ -83,7 +85,7 @@ export async function testMailboxSmtp(formData: FormData) {
   await requireUser();
   const id = String(formData.get("id") || "");
   const mailbox = await prisma.mailbox.findUnique({ where: { id } });
-  if (!mailbox?.smtpUser || !mailbox.smtpPasswordEnc) redirect(`/mailboxes/${id}?notice=SMTP не заполнен`);
+  if (!mailbox?.smtpUser || !mailbox.smtpPasswordEnc) redirect(withNotice(`/mailboxes/${id}`, "SMTP не заполнен"));
   try {
     const { decryptSecret } = await import("@/lib/crypto/secrets");
     await verifySmtp({
@@ -95,11 +97,12 @@ export async function testMailboxSmtp(formData: FormData) {
       fromAddress: mailbox.smtpFromAddress || mailbox.address,
     });
     await prisma.mailbox.update({ where: { id }, data: { repliesPaused: false, smtpLastError: null } });
-    redirect(`/mailboxes/${id}?notice=SMTP в порядке, пауза ответов снята`);
+    redirect(withNotice(`/mailboxes/${id}`, "SMTP в порядке, пауза ответов снята"));
   } catch (error) {
+    rethrowRedirect(error);
     const message = safeError(error, []);
     await prisma.mailbox.update({ where: { id }, data: { smtpLastError: message } });
-    redirect(`/mailboxes/${id}?notice=${encodeURIComponent(message)}`);
+    redirect(withNotice(`/mailboxes/${id}`, message));
   }
 }
 
@@ -107,7 +110,7 @@ export async function pollMailboxNow(formData: FormData) {
   await requireUser();
   const id = String(formData.get("id") || "");
   await pollMailbox(id, { force: true });
-  redirect(`/mailboxes/${id}?notice=Проверка выполнена`);
+  redirect(withNotice(`/mailboxes/${id}`, "Проверка выполнена"));
 }
 
 export async function installStarterRules(formData: FormData) {
@@ -127,14 +130,20 @@ export async function installStarterRules(formData: FormData) {
       dryRun: false,
     })),
   });
-  redirect(`/rules?mailboxId=${mailboxId}&notice=Базовые исключения добавлены`);
+  redirect(withNotice(`/rules?mailboxId=${mailboxId}`, "Базовые исключения добавлены"));
 }
 
 export async function resumeReplies(formData: FormData) {
   await requireUser();
   const id = String(formData.get("id") || "");
   await prisma.mailbox.update({ where: { id }, data: { repliesPaused: false, smtpLastError: null } });
-  redirect(`/mailboxes/${id}?notice=Ответы возобновлены`);
+  redirect(withNotice(`/mailboxes/${id}`, "Ответы возобновлены"));
+}
+
+function rethrowRedirect(error: unknown): void {
+  if (typeof error === "object" && error !== null && "digest" in error && String((error as { digest?: unknown }).digest).startsWith("NEXT_REDIRECT")) {
+    throw error;
+  }
 }
 
 function required(formData: FormData, key: string): string {

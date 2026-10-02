@@ -7,7 +7,7 @@ export default async function NewRulePage({ searchParams }: { searchParams: Prom
   const [mailboxes, templates, recipients] = await Promise.all([
     prisma.mailbox.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true } }),
     prisma.replyTemplate.findMany({ where: { active: true }, select: { id: true, name: true, mailboxId: true } }),
-    prisma.b24Recipient.findMany({ where: { active: true }, select: { id: true, name: true } }),
+    prisma.b24Recipient.findMany({ where: { active: true }, orderBy: { name: "asc" }, select: { id: true, name: true, login: true, externalId: true, active: true } }),
   ]);
   return (
     <>

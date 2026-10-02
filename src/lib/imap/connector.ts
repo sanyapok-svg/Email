@@ -2,6 +2,7 @@ import { ImapFlow } from "imapflow";
 import { classifyStructure, type StructureNode } from "@/lib/mail/structure";
 import type { PipelineInput } from "@/lib/mail/pipeline";
 import { logEvent } from "@/lib/log";
+import { mailTlsOptions } from "@/lib/tls/mail";
 
 const HEADER_FIELDS = [
   "subject",
@@ -49,6 +50,7 @@ export class ImapConnector {
       secure: this.config.secure,
       auth: { user: this.config.user, pass: this.config.password },
       logger: false,
+      tls: mailTlsOptions(),
       connectionTimeout: 15000,
       greetingTimeout: 15000,
       socketTimeout: 20000,
@@ -157,11 +159,22 @@ export async function testImapConnection(config: ImapConfig): Promise<InboxStatu
 }
 
 export function safeError(error: unknown, secrets: string[]): string {
-  let message = error instanceof Error ? error.message : "Неизвестная ошибка";
+  let message = [error instanceof Error ? error.message : "Неизвестная ошибка", imapServerText(error)].filter(Boolean).join(": ");
+  if (/AUTHENTICATIONFAILED|invalid credentials|IMAP is disabled/i.test(message)) {
+    message = "Яндекс отклонил вход: неверный пароль или IMAP выключен. Нужен пароль приложения, не пароль от аккаунта.";
+  }
   for (const secret of secrets) {
     if (secret && secret.length > 2) message = message.split(secret).join("[redacted]");
   }
   return message.slice(0, 500);
+}
+
+function imapServerText(error: unknown): string {
+  if (!error || typeof error !== "object") return "";
+  const record = error as { response?: unknown; responseText?: unknown };
+  if (typeof record.responseText === "string" && record.responseText.trim()) return record.responseText.trim();
+  if (typeof record.response === "string") return record.response.replace(/^\S+\s+(NO|BAD)\s+/i, "").trim();
+  return "";
 }
 
 function toDate(value: Date | string | undefined): Date | null {

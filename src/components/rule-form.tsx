@@ -1,6 +1,8 @@
 "use client";
 
+import Link from "next/link";
 import { useActionState, useState } from "react";
+import { B24NoticePreview, type NoticeRecipient } from "@/components/b24-notice-preview";
 import { OPERATORS, RULE_FIELDS } from "@/lib/rules/fields";
 import { saveRule, testRule } from "@/server/rules";
 
@@ -16,7 +18,7 @@ export function RuleForm({
   mailboxId?: string;
   mailboxes: Array<{ id: string; name: string }>;
   templates: Array<{ id: string; name: string; mailboxId: string }>;
-  recipients: Array<{ id: string; name: string }>;
+  recipients: Array<NoticeRecipient & { active: boolean }>;
   initial?: {
     id: string;
     mailboxId: string;
@@ -42,9 +44,18 @@ export function RuleForm({
   const [op, setOp] = useState<"all" | "any" | "none">(initial?.op || "all");
   const [rows, setRows] = useState<ConditionRow[]>(initial?.conditions.length ? initial.conditions : [{ field: "subject", operator: "contains", value: "" }]);
   const [selectedMailbox, setSelectedMailbox] = useState(initial?.mailboxId || mailboxId || mailboxes[0]?.id || "");
+  const [ruleType, setRuleType] = useState(initial?.type || "notify");
+  const [priority, setPriority] = useState(initial?.priority || "normal");
+  const [category, setCategory] = useState(initial?.category || "");
+  const [responseHours, setResponseHours] = useState(initial?.responseHours || 24);
+  const [notifyOn, setNotifyOn] = useState(initial?.notificationEnabled ?? true);
+  const [picked, setPicked] = useState<string[]>(initial?.recipientIds || []);
   const [testState, testAction, pending] = useActionState(testRule, null);
   const conditions = JSON.stringify({ op, conditions: rows.map((row) => ({ ...row, value: row.value })) });
   const visibleTemplates = templates.filter((item) => item.mailboxId === selectedMailbox);
+  const mailboxName = mailboxes.find((item) => item.id === selectedMailbox)?.name || "";
+  const chosen = recipients.filter((item) => picked.includes(item.id));
+  const listed = recipients.filter((item) => item.active || picked.includes(item.id));
 
   return (
     <div className="grid gap-6">
@@ -68,7 +79,7 @@ export function RuleForm({
           </label>
           <label className="text-sm">
             Тип
-            <select className="mt-1" name="type" defaultValue={initial?.type || "notify"}>
+            <select className="mt-1" name="type" value={ruleType} onChange={(event) => setRuleType(event.target.value)}>
               <option value="exclude">Исключение</option>
               <option value="notify">Уведомление или ответ</option>
             </select>
@@ -79,11 +90,11 @@ export function RuleForm({
           </label>
           <label className="text-sm">
             Категория
-            <input className="mt-1" name="category" defaultValue={initial?.category || ""} />
+            <input className="mt-1" name="category" value={category} onChange={(event) => setCategory(event.target.value)} />
           </label>
           <label className="text-sm">
             Приоритет
-            <select className="mt-1" name="priority" defaultValue={initial?.priority || "normal"}>
+            <select className="mt-1" name="priority" value={priority} onChange={(event) => setPriority(event.target.value)}>
               <option value="low">низкий</option>
               <option value="normal">обычный</option>
               <option value="high">высокий</option>
@@ -92,7 +103,7 @@ export function RuleForm({
           </label>
           <label className="text-sm">
             Срок ответа, часы
-            <input className="mt-1" name="responseHours" type="number" defaultValue={initial?.responseHours || 24} />
+            <input className="mt-1" name="responseHours" type="number" value={responseHours} onChange={(event) => setResponseHours(Number(event.target.value))} />
           </label>
           <label className="text-sm">
             Шаблон ответа
@@ -141,20 +152,53 @@ export function RuleForm({
             Добавить условие
           </button>
         </div>
-        <label className="text-sm">
-          Получатели Битрикс24
-          <select className="mt-1" name="recipientIds" multiple defaultValue={initial?.recipientIds || []} size={Math.min(6, Math.max(3, recipients.length))}>
-            {recipients.map((item) => (
-              <option key={item.id} value={item.id}>
-                {item.name}
-              </option>
-            ))}
-          </select>
-        </label>
+        <div className="grid items-start gap-4 lg:grid-cols-2">
+          <fieldset className="grid gap-2 rounded-xl border border-line bg-card p-4">
+            <legend className="px-1 text-sm font-semibold">Получатели в Битрикс24</legend>
+            <p className="text-sm text-muted">
+              Отметьте, кому уйдёт уведомление. Список ведётся в разделе <Link className="underline" href="/users">Пользователи</Link>.
+            </p>
+            {listed.length === 0 ? (
+              <p className="text-sm">Активных пользователей пока нет.</p>
+            ) : (
+              <div className="grid gap-1">
+                {listed.map((item) => (
+                  <label key={item.id} className="flex items-start gap-2 rounded-md px-1 py-1.5 text-sm hover:bg-paper">
+                    <input
+                      style={{ width: "auto" }}
+                      type="checkbox"
+                      name="recipientIds"
+                      value={item.id}
+                      checked={picked.includes(item.id)}
+                      onChange={(event) =>
+                        setPicked((current) => (event.target.checked ? [...current, item.id] : current.filter((id) => id !== item.id)))
+                      }
+                    />
+                    <span>
+                      <span className="font-medium">{item.name}</span>
+                      <span className="block text-muted">
+                        {item.login} · ID Б24 {item.externalId}
+                        {item.active ? "" : " · выключен"}
+                      </span>
+                    </span>
+                  </label>
+                ))}
+              </div>
+            )}
+          </fieldset>
+          <B24NoticePreview
+            enabled={ruleType !== "exclude" && notifyOn}
+            mailboxName={mailboxName}
+            priority={priority}
+            category={category}
+            responseHours={responseHours}
+            recipients={chosen}
+          />
+        </div>
         <div className="grid gap-2 md:grid-cols-3">
           <Check name="active" label="Правило активно" defaultChecked={initial?.active ?? true} />
           <Check name="dryRun" label="Сухой прогон правила" defaultChecked={initial?.dryRun} />
-          <Check name="notificationEnabled" label="Создавать уведомление" defaultChecked={initial?.notificationEnabled ?? true} />
+          <Check name="notificationEnabled" label="Создавать уведомление" defaultChecked={initial?.notificationEnabled ?? true} onChange={setNotifyOn} />
           <Check name="autoReplyEnabled" label="Автоматический ответ" defaultChecked={initial?.autoReplyEnabled} />
           <Check name="useExtractedDeadline" label="Срок из дедлайна письма" defaultChecked={initial?.useExtractedDeadline} />
           <Check name="replyRespectWorkingHours" label="Ответ по рабочим часам" defaultChecked={initial?.replyRespectWorkingHours} />
@@ -193,10 +237,26 @@ export function RuleForm({
   }
 }
 
-function Check({ name, label, defaultChecked }: { name: string; label: string; defaultChecked?: boolean }) {
+function Check({
+  name,
+  label,
+  defaultChecked,
+  onChange,
+}: {
+  name: string;
+  label: string;
+  defaultChecked?: boolean;
+  onChange?: (checked: boolean) => void;
+}) {
   return (
     <label className="flex items-center gap-2 text-sm">
-      <input style={{ width: "auto" }} type="checkbox" name={name} defaultChecked={defaultChecked} />
+      <input
+        style={{ width: "auto" }}
+        type="checkbox"
+        name={name}
+        defaultChecked={defaultChecked}
+        onChange={onChange ? (event) => onChange(event.target.checked) : undefined}
+      />
       {label}
     </label>
   );

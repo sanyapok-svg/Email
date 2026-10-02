@@ -39,6 +39,11 @@ button.secondary, .button.secondary {
   border: 1px solid var(--color-line);
 }
 
+aside button.secondary {
+  color: #f6f1e8;
+  border-color: rgba(246, 241, 232, 0.45);
+}
+
 table {
   width: 100%;
   border-collapse: collapse;
@@ -58,4 +63,36 @@ th {
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--color-muted);
+}
+
+.users-table th {
+  font-size: 0.84rem;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  color: #6d6458;
+}
+
+.users-toolbar button {
+  border-radius: 999px;
+}
+
+button.bare {
+  background: transparent;
+  color: #525c69;
+  border: 0;
+  border-radius: 0.45rem;
+  padding: 0.35rem;
+}
+
+button.bare:hover {
+  background: #f3efe6;
+}
+
+button:disabled {
+  opacity: 0.45;
+}
+
+.page-size {
+  width: auto;
 }

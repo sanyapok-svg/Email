@@ -14,7 +14,7 @@ export default async function RulePage({ params, searchParams }: { params: Promi
   const [mailboxes, templates, recipients] = await Promise.all([
     prisma.mailbox.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true } }),
     prisma.replyTemplate.findMany({ where: { active: true }, select: { id: true, name: true, mailboxId: true } }),
-    prisma.b24Recipient.findMany({ where: { active: true }, select: { id: true, name: true } }),
+    prisma.b24Recipient.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true, login: true, externalId: true, active: true } }),
   ]);
   const group = isGroup(rule.conditions as ConditionGroup) ? (rule.conditions as ConditionGroup) : { op: "all" as const, conditions: [] };
   const action = normalizeAction(rule.action);

@@ -10,7 +10,7 @@ export function Shell({ children, pathname = "/" }: { children: React.ReactNode;
           <p className="text-xl font-semibold">Входящие</p>
         </div>
         <Nav pathname={pathname} />
-        <form action={logout} className="mt-auto p-4">
+        <form action={logout} className="mt-auto px-4 pt-4 pb-16">
           <button className="secondary w-full" type="submit">
             Выйти
           </button>

@@ -1,3 +1,4 @@
+import { formatBitrixNotice, formatDueLabel } from "@/lib/b24/notice";
 import type { WorkSchedule } from "@/lib/hours/schedule";
 import { planByWorkingHours, type OutsidePolicy } from "@/lib/hours/schedule";
 import type { NormalizedMessage } from "@/lib/mail/model";
@@ -103,6 +104,7 @@ function buildNotification(
       ctx.throttle.domainPaused);
   const status: QueueStatus = dryRun ? "dry_run" : throttled ? "throttled" : window.status === "cancelled" ? "cancelled" : window.status;
   const preview = ctx.previewInNotification ? (message.bodyNewText || message.bodyFullText).slice(0, ctx.previewChars) : undefined;
+  const from = message.fromDisplayName ? `${message.fromDisplayName} <${message.fromEmail}>` : message.fromEmail;
   return {
     status,
     priority: rule.action.priority,
@@ -118,7 +120,15 @@ function buildNotification(
       mailboxName: ctx.mailboxName,
       ruleId: rule.id,
       subject: message.subject,
-      from: message.fromDisplayName ? `${message.fromDisplayName} <${message.fromEmail}>` : message.fromEmail,
+      from,
+      text: formatBitrixNotice({
+        mailboxName: ctx.mailboxName,
+        subject: message.subject,
+        from,
+        priority: rule.action.priority,
+        category: rule.category,
+        responseDueLabel: formatDueLabel(due.dueAt),
+      }),
       priority: rule.action.priority,
       responseDueAt: due.dueAt?.toISOString() ?? null,
       category: rule.category,

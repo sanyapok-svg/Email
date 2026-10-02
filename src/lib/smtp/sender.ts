@@ -1,5 +1,6 @@
 import nodemailer from "nodemailer";
 import { safeError } from "@/lib/imap/connector";
+import { mailTlsOptions } from "@/lib/tls/mail";
 
 export type SmtpConfig = {
   host: string;
@@ -66,7 +67,7 @@ function createTransport(config: SmtpConfig) {
     greetingTimeout: 15000,
     socketTimeout: 20000,
     requireTLS: !config.secure,
-    tls: { minVersion: "TLSv1.2" },
+    tls: mailTlsOptions(),
   });
 }
 

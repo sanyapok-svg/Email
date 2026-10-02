@@ -32,7 +32,7 @@ async function dispatchNotifications() {
     }
     const claimed = await prisma.notification.updateMany({ where: { id: item.id, status: item.status }, data: { status: "sending" } });
     if (claimed.count !== 1) continue;
-    const payload = item.payload as Prisma.JsonObject;
+    const payload = await withBitrixUsers(item.payload as Prisma.JsonObject);
     const result = await deliverToBitrix({
       mode: config.b24Mode === "webhook" ? "webhook" : "mock",
       webhookUrl: webhook,
@@ -147,6 +147,23 @@ function readyWhere(now: Date) {
       { OR: [{ scheduledAt: null }, { scheduledAt: { lte: now } }] },
       { OR: [{ nextAttemptAt: null }, { nextAttemptAt: { lte: now } }] },
     ],
+  };
+}
+
+async function withBitrixUsers(payload: Prisma.JsonObject): Promise<Prisma.JsonObject> {
+  const ids = Array.isArray(payload.recipients) ? payload.recipients.map(String) : [];
+  if (!ids.length) return payload;
+  const people = await prisma.b24Recipient.findMany({
+    where: { id: { in: ids }, active: true },
+    select: { name: true, login: true, externalId: true },
+  });
+  return {
+    ...payload,
+    b24Users: people.map((person) => ({
+      name: person.name,
+      login: person.login,
+      externalId: person.externalId,
+    })),
   };
 }
 

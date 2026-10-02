@@ -7,6 +7,7 @@ import { encryptSecret } from "@/lib/crypto/secrets";
 import { prisma } from "@/lib/db";
 import { dispatchQueues } from "@/lib/queues/dispatch";
 import { replySubject } from "@/lib/replies/render";
+import { withNotice } from "@/lib/http/notice";
 import { getIntegrationConfig } from "@/lib/settings";
 
 export async function retryNotification(formData: FormData) {
@@ -17,7 +18,7 @@ export async function retryNotification(formData: FormData) {
     data: { status: "pending", attempts: 0, nextAttemptAt: new Date(), lastError: null },
   });
   await dispatchQueues();
-  redirect(`/notifications/${id}?notice=Повтор поставлен в очередь`);
+  redirect(withNotice(`/notifications/${id}`, "Повтор поставлен в очередь"));
 }
 
 export async function retryReply(formData: FormData) {
@@ -28,15 +29,15 @@ export async function retryReply(formData: FormData) {
     data: { status: "pending", attempts: 0, nextAttemptAt: new Date(), lastError: null },
   });
   await dispatchQueues();
-  redirect(`/replies/${id}?notice=Повтор поставлен в очередь`);
+  redirect(withNotice(`/replies/${id}`, "Повтор поставлен в очередь"));
 }
 
 export async function sendManualReply(formData: FormData) {
   await requireUser();
   const messageId = String(formData.get("messageId") || "");
   const message = await prisma.processedMessage.findUnique({ where: { id: messageId }, include: { mailbox: true } });
-  if (!message) redirect("/messages?notice=Письмо не найдено");
-  if (!message.mailbox.repliesEnabled) redirect(`/messages/${messageId}?notice=Ответы для ящика выключены`);
+  if (!message) redirect(withNotice("/messages", "Письмо не найдено"));
+  if (!message.mailbox.repliesEnabled) redirect(withNotice(`/messages/${messageId}`, "Ответы для ящика выключены"));
   const config = await getIntegrationConfig();
   const dry = config.globalDryRun || message.mailbox.dryRun;
   const toAddress = message.replyTo[0] || message.fromEmail;
@@ -57,7 +58,7 @@ export async function sendManualReply(formData: FormData) {
     },
   });
   if (!dry) await dispatchQueues();
-  redirect(`/messages/${messageId}?notice=${dry ? "Ответ сохранён как сухой прогон" : "Ответ поставлен в очередь"}`);
+  redirect(withNotice(`/messages/${messageId}`, dry ? "Ответ сохранён как сухой прогон" : "Ответ поставлен в очередь"));
 }
 
 export async function saveTemplate(formData: FormData) {
@@ -71,7 +72,7 @@ export async function saveTemplate(formData: FormData) {
   };
   if (id) await prisma.replyTemplate.update({ where: { id }, data });
   else await prisma.replyTemplate.create({ data });
-  redirect(`/templates?mailboxId=${data.mailboxId}&notice=Шаблон сохранён`);
+  redirect(withNotice(`/templates?mailboxId=${data.mailboxId}`, "Шаблон сохранён"));
 }
 
 export async function saveSettings(formData: FormData) {
@@ -104,19 +105,38 @@ export async function saveSettings(formData: FormData) {
       globalMessageDedupe: formData.get("globalMessageDedupe") === "on",
     },
   });
-  redirect("/settings?notice=Настройки сохранены");
+  redirect(withNotice("/settings", "Настройки сохранены"));
 }
 
-export async function saveRecipient(formData: FormData) {
+export async function saveB24User(formData: FormData) {
   await requireUser();
-  await prisma.b24Recipient.create({
-    data: {
-      name: String(formData.get("name") || "").trim() || "Получатель",
-      externalId: String(formData.get("externalId") || "").trim(),
-      active: true,
-    },
-  });
-  redirect("/settings?notice=Получатель добавлен");
+  const id = String(formData.get("id") || "");
+  const login = String(formData.get("login") || "").trim().toLowerCase();
+  const name = String(formData.get("name") || "").trim();
+  const externalId = String(formData.get("externalId") || "").trim();
+  const active = formData.get("active") === "on";
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(login)) redirect(userNotice("Укажите логин — адрес почты"));
+  if (!name) redirect(userNotice("Укажите ФИО"));
+  if (!/^\d+$/.test(externalId)) redirect(userNotice("ID Б24 — число из карточки пользователя Битрикс24"));
+  const sameId = await prisma.b24Recipient.findFirst({ where: { externalId, ...(id ? { NOT: { id } } : {}) } });
+  if (sameId) redirect(userNotice("Пользователь с таким ID Б24 уже есть"));
+  const sameLogin = await prisma.b24Recipient.findFirst({ where: { login, ...(id ? { NOT: { id } } : {}) } });
+  if (sameLogin) redirect(userNotice("Пользователь с таким логином уже есть"));
+  const data = { login, name, externalId, active };
+  if (id) await prisma.b24Recipient.update({ where: { id }, data });
+  else await prisma.b24Recipient.create({ data });
+  redirect(userNotice("Пользователь сохранён"));
+}
+
+export async function deleteB24User(formData: FormData) {
+  await requireUser();
+  const id = String(formData.get("id") || "");
+  if (id) await prisma.b24Recipient.delete({ where: { id } });
+  redirect(userNotice("Пользователь удалён"));
+}
+
+function userNotice(text: string): string {
+  return withNotice("/users", text);
 }
 
 function optionalNumber(formData: FormData, key: string): number | null {

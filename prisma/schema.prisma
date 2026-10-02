@@ -250,6 +250,8 @@ model OutboundReply {
 
 model B24Recipient {
   id         String   @id @default(cuid())
+  number     Int      @unique @default(autoincrement())
+  login      String   @default("")
   name       String
   externalId String   @map("external_id")
   active     Boolean  @default(true)

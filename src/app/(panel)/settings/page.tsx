@@ -1,11 +1,11 @@
+import Link from "next/link";
 import { Notice, PageTitle } from "@/components/shell";
 import { getIntegrationConfig } from "@/lib/settings";
-import { prisma } from "@/lib/db";
-import { saveRecipient, saveSettings } from "@/server/ops";
+import { saveSettings } from "@/server/ops";
 
 export default async function SettingsPage({ searchParams }: { searchParams: Promise<{ notice?: string }> }) {
   const params = await searchParams;
-  const [config, recipients] = await Promise.all([getIntegrationConfig(), prisma.b24Recipient.findMany({ orderBy: { name: "asc" } })]);
+  const config = await getIntegrationConfig();
   return (
     <>
       <PageTitle title="Настройки" text="Веб-хук хранится в зашифрованном виде. Пока режим «заглушка», сообщения в Битрикс24 не отправляются." />
@@ -37,15 +37,9 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
         </label>
         <button type="submit">Сохранить настройки</button>
       </form>
-      <form action={saveRecipient} className="mt-8 grid max-w-2xl gap-3">
-        <h2 className="text-lg font-semibold">Получатели Битрикс24</h2>
-        <input name="name" placeholder="Название, например Юристы" required />
-        <input name="externalId" placeholder="Идентификатор чата или пользователя" required />
-        <button type="submit">Добавить</button>
-        <ul className="text-sm">
-          {recipients.map((item) => <li key={item.id}>{item.name} · {item.externalId}{item.active ? "" : " · выключен"}</li>)}
-        </ul>
-      </form>
+      <p className="mt-8 max-w-2xl text-sm text-muted">
+        Получатели уведомлений задаются в разделе <Link className="underline" href="/users">Пользователи</Link> и выбираются в правиле.
+      </p>
     </>
   );
 }
