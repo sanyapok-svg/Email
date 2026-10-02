@@ -20,7 +20,7 @@ cp .env.example .env
 npm run secrets
 ```
 
-Вставьте выданные значения в `.env`, задайте `ADMIN_USERNAME` и `DATABASE_URL`, затем:
+Вставьте выданные значения в `.env`, задайте `ADMIN_USERNAME`, `DATABASE_URL` и `DATABASE_URL_UNPOOLED` (локально они совпадают), затем:
 
 ```bash
 npx prisma migrate deploy
@@ -33,8 +33,8 @@ npm run dev
 
 - Runtime функций: Node.js. IMAP и SMTP не работают на Edge.
 - Подключите PostgreSQL и выполните `npx prisma migrate deploy`.
-- Задайте `DATABASE_URL`, `AUTH_SECRET`, `ADMIN_USERNAME`, `ADMIN_PASSWORD`, `ENCRYPTION_KEY`, `CRON_SECRET`.
-- `vercel.json` вызывает опрос каждые 5 минут и отправку очередей каждые 2 минуты. На тарифе Hobby расписание cron может быть ограничено: тогда используйте кнопку «Проверить почту сейчас».
+- Задайте `DATABASE_URL`, `DATABASE_URL_UNPOOLED`, `AUTH_SECRET`, `ADMIN_USERNAME`, `ADMIN_PASSWORD`, `ENCRYPTION_KEY`, `CRON_SECRET`. Neon на Vercel создаёт оба адреса базы сам.
+- `vercel.json` на тарифе Hobby запускает опрос раз в сутки в 09:00 МСК и отправку очереди в 09:15 МСК. Чаще одного раза в день cron на Hobby недоступен; почту можно проверить кнопкой «Проверить почту сейчас». На Pro можно вернуть интервалы `*/5` и `*/2`.
 - Секрет cron Vercel должен совпадать с `CRON_SECRET`.
 
 Проверка живости: `GET /api/health`.
