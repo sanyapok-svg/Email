@@ -1,14 +1,11 @@
 "use server";
 
-import { randomUUID } from "crypto";
 import { redirect } from "next/navigation";
 import { requireUser } from "@/lib/auth/session";
 import { encryptSecret } from "@/lib/crypto/secrets";
 import { prisma } from "@/lib/db";
 import { dispatchQueues } from "@/lib/queues/dispatch";
-import { replySubject } from "@/lib/replies/render";
 import { withNotice } from "@/lib/http/notice";
-import { getIntegrationConfig } from "@/lib/settings";
 
 export async function retryNotification(formData: FormData) {
   await requireUser();
@@ -21,63 +18,9 @@ export async function retryNotification(formData: FormData) {
   redirect(withNotice(`/notifications/${id}`, "Повтор поставлен в очередь"));
 }
 
-export async function retryReply(formData: FormData) {
-  await requireUser();
-  const id = String(formData.get("id") || "");
-  await prisma.outboundReply.update({
-    where: { id },
-    data: { status: "pending", attempts: 0, nextAttemptAt: new Date(), lastError: null },
-  });
-  await dispatchQueues();
-  redirect(withNotice(`/replies/${id}`, "Повтор поставлен в очередь"));
-}
-
-export async function sendManualReply(formData: FormData) {
-  await requireUser();
-  const messageId = String(formData.get("messageId") || "");
-  const message = await prisma.processedMessage.findUnique({ where: { id: messageId }, include: { mailbox: true } });
-  if (!message) redirect(withNotice("/messages", "Письмо не найдено"));
-  if (!message.mailbox.repliesEnabled) redirect(withNotice(`/messages/${messageId}`, "Ответы для ящика выключены"));
-  const config = await getIntegrationConfig();
-  const dry = config.globalDryRun || message.mailbox.dryRun;
-  const toAddress = message.replyTo[0] || message.fromEmail;
-  await prisma.outboundReply.create({
-    data: {
-      mailboxId: message.mailboxId,
-      messageId: message.id,
-      kind: "manual",
-      idempotencyKey: `manual:${message.id}:${randomUUID()}`,
-      status: dry ? "dry_run" : "pending",
-      toAddress,
-      subject: replySubject(message.subject),
-      bodyText: String(formData.get("body") || ""),
-      inReplyTo: message.messageIdHeader,
-      references: message.messageIdHeader,
-      templateId: String(formData.get("templateId") || "") || null,
-      maxAttempts: config.replyMaxAttempts,
-    },
-  });
-  if (!dry) await dispatchQueues();
-  redirect(withNotice(`/messages/${messageId}`, dry ? "Ответ сохранён как сухой прогон" : "Ответ поставлен в очередь"));
-}
-
-export async function saveTemplate(formData: FormData) {
-  await requireUser();
-  const id = String(formData.get("id") || "");
-  const data = {
-    mailboxId: String(formData.get("mailboxId") || ""),
-    name: String(formData.get("name") || "").trim() || "Шаблон",
-    bodyText: String(formData.get("bodyText") || ""),
-    active: formData.get("active") === "on",
-  };
-  if (id) await prisma.replyTemplate.update({ where: { id }, data });
-  else await prisma.replyTemplate.create({ data });
-  redirect(withNotice(`/templates?mailboxId=${data.mailboxId}`, "Шаблон сохранён"));
-}
-
 export async function saveSettings(formData: FormData) {
   await requireUser();
-  const current = await getIntegrationConfig();
+  const current = await prisma.integrationConfig.findUnique({ where: { id: "default" } });
   const webhook = String(formData.get("webhookUrl") || "").trim();
   await prisma.integrationConfig.upsert({
     where: { id: "default" },
@@ -85,22 +28,16 @@ export async function saveSettings(formData: FormData) {
       id: "default",
       b24Mode: String(formData.get("b24Mode") || "mock") === "webhook" ? "webhook" : "mock",
       webhookUrlEnc: webhook ? encryptSecret(webhook) : null,
-      globalDryRun: formData.get("globalDryRun") === "on",
       retentionDays: optionalNumber(formData, "retentionDays"),
       notifyMaxAttempts: clamp(Number(formData.get("notifyMaxAttempts") || 5), 1, 10),
-      replyMaxAttempts: clamp(Number(formData.get("replyMaxAttempts") || 5), 1, 10),
-      includeBodyPreview: formData.get("includeBodyPreview") === "on",
       previewChars: clamp(Number(formData.get("previewChars") || 280), 40, 2000),
       globalMessageDedupe: formData.get("globalMessageDedupe") === "on",
     },
     update: {
       b24Mode: String(formData.get("b24Mode") || "mock") === "webhook" ? "webhook" : "mock",
-      webhookUrlEnc: webhook ? encryptSecret(webhook) : current.webhookUrlEnc,
-      globalDryRun: formData.get("globalDryRun") === "on",
+      webhookUrlEnc: webhook ? encryptSecret(webhook) : current?.webhookUrlEnc,
       retentionDays: optionalNumber(formData, "retentionDays"),
       notifyMaxAttempts: clamp(Number(formData.get("notifyMaxAttempts") || 5), 1, 10),
-      replyMaxAttempts: clamp(Number(formData.get("replyMaxAttempts") || 5), 1, 10),
-      includeBodyPreview: formData.get("includeBodyPreview") === "on",
       previewChars: clamp(Number(formData.get("previewChars") || 280), 40, 2000),
       globalMessageDedupe: formData.get("globalMessageDedupe") === "on",
     },
@@ -136,7 +73,7 @@ export async function deleteB24User(formData: FormData) {
 }
 
 function userNotice(text: string): string {
-  return withNotice("/users", text);
+  return withNotice("/b24-users", text);
 }
 
 function optionalNumber(formData: FormData, key: string): number | null {

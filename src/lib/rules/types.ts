@@ -1,3 +1,7 @@
+import type { NoticeField } from "@/lib/b24/notice";
+
+export type { NoticeField };
+
 export type ConditionOperator =
   | "eq"
   | "neq"
@@ -37,6 +41,8 @@ export type ConditionNode = Condition | ConditionGroup;
 
 export type Priority = "low" | "normal" | "high" | "critical";
 
+export type NoticeGrouping = "each" | "digest";
+
 export type RuleAction = {
   notificationEnabled: boolean;
   category?: string | null;
@@ -44,10 +50,11 @@ export type RuleAction = {
   responseHours: number;
   useExtractedDeadline: boolean;
   recipientIds: string[];
-  autoReplyEnabled: boolean;
-  templateId?: string | null;
-  replyRespectWorkingHours: boolean;
   throttlingEnabled: boolean;
+  notifyOutsidePolicy?: "send_now" | "defer" | "cancel";
+  noticeGrouping: NoticeGrouping;
+  noticeFields: NoticeField[];
+  noticeMetaOptional?: boolean;
 };
 
 export type RuleRecord = {
@@ -59,7 +66,6 @@ export type RuleRecord = {
   category: string | null;
   conditions: ConditionNode;
   action: RuleAction;
-  dryRun: boolean;
 };
 
 export function isGroup(node: ConditionNode): node is ConditionGroup {

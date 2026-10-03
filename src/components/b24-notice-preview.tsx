@@ -1,4 +1,4 @@
-import { EXAMPLE_FROM, EXAMPLE_SUBJECT, formatBitrixNotice, priorityLabel } from "@/lib/b24/notice";
+import { EXAMPLE_FROM, EXAMPLE_SUBJECT, formatBitrixDigest, formatBitrixNotice, priorityLabel, type NoticeLetter } from "@/lib/b24/notice";
 
 export type NoticeRecipient = {
   id: string;
@@ -21,6 +21,8 @@ export function B24NoticePreview({
   category,
   responseHours,
   recipients,
+  grouping = "each",
+  fields,
 }: {
   enabled: boolean;
   mailboxName: string;
@@ -28,22 +30,41 @@ export function B24NoticePreview({
   category: string;
   responseHours: number;
   recipients: NoticeRecipient[];
+  grouping?: "each" | "digest";
+  fields: readonly string[];
 }) {
   const hours = Number.isFinite(responseHours) && responseHours > 0 ? responseHours : 24;
-  const text = formatBitrixNotice({
-    mailboxName,
-    subject: EXAMPLE_SUBJECT,
-    from: EXAMPLE_FROM,
-    priority,
-    category,
-    responseDueLabel: `через ${hours} ч.`,
-  });
+  const due = `через ${hours} ч.`;
+  const first = exampleLetter(EXAMPLE_SUBJECT, EXAMPLE_FROM, "3 октября, 11:40", "Просим согласовать договор и вернуть подписанный скан до конца недели.", ["dogovor.pdf"]);
+  const second = exampleLetter("Счёт № 18 от 02.10.2026", "Павел Орлов <pavel@client.ru>", "3 октября, 12:05", "Направляем счёт на оплату. Просим подтвердить получение.", ["schet.pdf"]);
+  const text =
+    grouping === "digest"
+      ? formatBitrixDigest({
+          mailboxName,
+          priority,
+          category,
+          fields,
+          letters: [
+            { ...first, responseDueLabel: due },
+            { ...second, responseDueLabel: due },
+          ],
+        })
+      : formatBitrixNotice({
+          mailboxName,
+          priority,
+          category,
+          responseDueLabel: due,
+          fields,
+          letter: first,
+        });
 
   return (
-    <section className="rounded-xl border border-line bg-card p-4">
+    <section className="min-w-0 self-start rounded-xl border border-line bg-card p-4 lg:sticky lg:top-4">
       <h2 className="font-semibold">Как это получит пользователь в Битрикс24</h2>
       <p className="mt-1 text-sm text-muted">
-        Пример на письме «{EXAMPLE_SUBJECT}». Такой текст придёт каждому выбранному пользователю личным сообщением в мессенджере от автора веб-хука.
+        {grouping === "digest"
+          ? "Пример общего сообщения за одну проверку. Такой текст придёт каждому выбранному пользователю личным сообщением в мессенджере от автора веб-хука."
+          : `Пример на письме «${EXAMPLE_SUBJECT}». Такой текст придёт каждому выбранному пользователю личным сообщением в мессенджере от автора веб-хука.`}
       </p>
       {!enabled ? (
         <p className="mt-4 text-sm">Для этого правила уведомление в Битрикс24 не создаётся.</p>
@@ -58,9 +79,9 @@ export function B24NoticePreview({
           <div className="bg-[#f1f4f6] px-4 py-3">
             <div className="ml-auto max-w-[92%] rounded-2xl rounded-br-md bg-white px-3 py-2 shadow-sm">
               <p className="text-xs font-semibold" style={{ color: PRIORITY_COLOR[priority] || PRIORITY_COLOR.normal }}>
-                Автор веб-хука · {priorityLabel(priority)}
+                {fields.includes("priority") ? `Автор веб-хука · ${priorityLabel(priority)}` : "Автор веб-хука"}
               </p>
-              <p className="mt-1 whitespace-pre-line text-sm leading-5 text-[#333]">{text}</p>
+              <p className="mt-1 whitespace-pre-line break-words text-sm leading-5 text-[#333]">{text}</p>
             </div>
             <ul className="mt-3 grid gap-1 text-xs text-[#525c69]">
                 {recipients.map((person) => (
@@ -75,4 +96,20 @@ export function B24NoticePreview({
       )}
     </section>
   );
+}
+
+function exampleLetter(subject: string, from: string, received: string, text: string, attachments: string[]): NoticeLetter {
+  return {
+    subject,
+    from,
+    received,
+    text,
+    attachments,
+    phones: ["+7 916 000-00-00"],
+    urls: ["https://client.ru/doc"],
+    contracts: ["45/2026"],
+    invoices: ["18"],
+    amounts: ["120 000 ₽"],
+    deadline: "10 октября, 18:00",
+  };
 }

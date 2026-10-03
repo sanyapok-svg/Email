@@ -21,16 +21,16 @@ async function hmacKey(secret: string) {
   ]);
 }
 
-export async function signSession(username: string, secret: string, ttlSeconds = 60 * 60 * 12): Promise<string> {
+export async function signSession(username: string, secret: string, ttlSeconds = 60 * 60 * 12, userId?: string): Promise<string> {
   const payload = bytesToBase64Url(
-    encoder.encode(JSON.stringify({ u: username, exp: Date.now() + ttlSeconds * 1000 })),
+    encoder.encode(JSON.stringify({ u: username, id: userId, exp: Date.now() + ttlSeconds * 1000 })),
   );
   const key = await hmacKey(secret);
   const sig = new Uint8Array(await crypto.subtle.sign("HMAC", key, encoder.encode(payload)));
   return `${payload}.${bytesToBase64Url(sig)}`;
 }
 
-export async function verifySession(token: string, secret: string): Promise<{ username: string } | null> {
+export async function verifySession(token: string, secret: string): Promise<{ username: string; id?: string } | null> {
   const [payload, signature] = token.split(".");
   if (!payload || !signature) return null;
   const key = await hmacKey(secret);
@@ -38,9 +38,9 @@ export async function verifySession(token: string, secret: string): Promise<{ us
   const valid = await crypto.subtle.verify("HMAC", key, signatureBytes as BufferSource, encoder.encode(payload));
   if (!valid) return null;
   try {
-    const data = JSON.parse(new TextDecoder().decode(base64UrlToBytes(payload))) as { u?: string; exp?: number };
+    const data = JSON.parse(new TextDecoder().decode(base64UrlToBytes(payload))) as { u?: string; id?: string; exp?: number };
     if (!data.u || !data.exp || data.exp < Date.now()) return null;
-    return { username: data.u };
+    return { username: data.u, id: data.id };
   } catch {
     return null;
   }

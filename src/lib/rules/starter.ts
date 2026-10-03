@@ -6,10 +6,10 @@ const notifyDefaults: RuleAction = {
   responseHours: 24,
   useExtractedDeadline: false,
   recipientIds: [],
-  autoReplyEnabled: false,
-  templateId: null,
-  replyRespectWorkingHours: false,
   throttlingEnabled: true,
+  noticeGrouping: "each",
+  noticeFields: ["subject", "from", "priority", "due"],
+  noticeMetaOptional: true,
 };
 
 export function starterRules(): Array<Omit<RuleRecord, "id">> {
@@ -20,7 +20,6 @@ export function starterRules(): Array<Omit<RuleRecord, "id">> {
       position: 10,
       active: true,
       category: null,
-      dryRun: false,
       action: { ...notifyDefaults, notificationEnabled: false },
       conditions: {
         op: "all",
@@ -36,7 +35,6 @@ export function starterRules(): Array<Omit<RuleRecord, "id">> {
       position: 20,
       active: true,
       category: null,
-      dryRun: false,
       action: { ...notifyDefaults, notificationEnabled: false },
       conditions: {
         op: "any",
@@ -53,7 +51,6 @@ export function starterRules(): Array<Omit<RuleRecord, "id">> {
       position: 30,
       active: true,
       category: null,
-      dryRun: false,
       action: { ...notifyDefaults, notificationEnabled: false },
       conditions: {
         op: "any",

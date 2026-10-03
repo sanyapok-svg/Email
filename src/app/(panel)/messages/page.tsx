@@ -1,4 +1,6 @@
 import Link from "next/link";
+import { MailboxMessages, type MessageRow } from "@/components/mailbox-messages";
+import { MessageSearch } from "@/components/message-search";
 import { Notice, PageTitle } from "@/components/shell";
 import { prisma } from "@/lib/db";
 import { labelStatus } from "@/lib/labels";
@@ -27,69 +29,58 @@ export default async function MessagesPage({ searchParams }: { searchParams: Pro
   ]);
   return (
     <>
-      <PageTitle title="Письма" text="Поиск идёт по уже сохранённому тексту и не запускает новую обработку." />
+      <PageTitle title="Письма" text="Письма собраны под своим ящиком, список можно свернуть. Поиск идёт по уже сохранённому тексту и не запускает новую обработку." />
       <Notice text={params.notice} />
-      <form className="mb-4 grid gap-2 md:grid-cols-4">
-        <input name="q" defaultValue={params.q || ""} placeholder="Слова из темы или текста" />
-        <select name="mailboxId" defaultValue={params.mailboxId || ""}>
-          <option value="">все ящики</option>
-          {mailboxes.map((mailbox) => <option key={mailbox.id} value={mailbox.id}>{mailbox.name}</option>)}
-        </select>
-        <input name="from" defaultValue={params.from || ""} placeholder="Отправитель" />
-        <input name="domain" defaultValue={params.domain || ""} placeholder="Домен" />
-        <input name="phone" defaultValue={params.phone || ""} placeholder="Телефон" />
-        <input name="email" defaultValue={params.email || ""} placeholder="Email из текста" />
-        <input name="contract" defaultValue={params.contract || ""} placeholder="Договор" />
-        <input name="invoice" defaultValue={params.invoice || ""} placeholder="Счёт" />
-        <select name="decision" defaultValue={params.decision || ""}>
-          <option value="">любое решение</option>
-          {["exclude", "notify", "reply_only", "notify_and_reply", "skipped_no_rule", "error"].map((item) => <option key={item} value={item}>{labelStatus(item)}</option>)}
-        </select>
-        <select name="sentiment" defaultValue={params.sentiment || ""}>
-          <option value="">любая тональность</option>
-          {["positive", "neutral", "negative", "mixed"].map((item) => <option key={item}>{item}</option>)}
-        </select>
-        <select name="urgency" defaultValue={params.urgency || ""}>
-          <option value="">любая срочность</option>
-          {["low", "normal", "high", "critical"].map((item) => <option key={item}>{item}</option>)}
-        </select>
-        <select name="language" defaultValue={params.language || ""}>
-          <option value="">любой язык</option>
-          <option value="ru">ru</option>
-          <option value="en">en</option>
-          <option value="mixed">mixed</option>
-        </select>
-        <input type="date" name="fromDate" defaultValue={params.fromDate || ""} />
-        <input type="date" name="toDate" defaultValue={params.toDate || ""} />
-        <button type="submit">Найти</button>
-      </form>
-      <div className="overflow-x-auto rounded-xl border border-line">
-        <table>
-          <thead>
-            <tr>
-              <th>Дата</th>
-              <th>Тема</th>
-              <th>Отправитель</th>
-              <th>Решение</th>
-              <th>Сущности</th>
-            </tr>
-          </thead>
-          <tbody>
-            {messages.map((message) => (
-              <tr key={message.id}>
-                <td>{message.receivedAt.toLocaleString("ru-RU")}</td>
-                <td>
-                  <Link className="underline" href={`/messages/${message.id}`}>{message.subject || "(без темы)"}</Link>
-                  <div className="text-xs text-muted">{message.mailbox.name}{message.bodyTruncated ? " · текст обрезан" : ""}</div>
-                </td>
-                <td>{message.fromEmail}</td>
-                <td>{labelStatus(message.decision)}<div className="text-xs text-muted">{message.matchedRule?.name || ""}</div></td>
-                <td className="text-xs">{[message.phonesNormalized[0], message.contractNumbers[0], message.invoiceNumbers[0], message.urgencyLevel].filter(Boolean).join(" · ") || "—"}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      <MessageSearch key={searchKey(params)} mailboxes={mailboxes} values={params} />
+      <MessageGroups messages={messages} />
     </>
+  );
+}
+
+function searchKey(params: Record<string, string | undefined>): string {
+  return ["q", "mailboxId", "from", "domain", "phone", "email", "contract", "invoice", "decision", "sentiment", "urgency", "language", "fromDate", "toDate"]
+    .map((key) => params[key] || "")
+    .join("\0");
+}
+
+function MessageGroups({ messages }: { messages: Awaited<ReturnType<typeof searchMessages>> }) {
+  const groups = new Map<string, { id: string; name: string; address: string; items: MessageRow[] }>();
+  for (const message of messages) {
+    const group = groups.get(message.mailboxId) ?? {
+      id: message.mailboxId,
+      name: message.mailbox.name,
+      address: message.mailbox.address,
+      items: [],
+    };
+    group.items.push({
+      id: message.id,
+      receivedAt: message.receivedAt.toLocaleString("ru-RU"),
+      subject: message.subject || "(без темы)",
+      truncated: message.bodyTruncated,
+      fromEmail: message.fromEmail,
+      decision: labelStatus(message.decision),
+      ruleName: message.matchedRule?.name ?? null,
+      entities: [message.phonesNormalized[0], message.contractNumbers[0], message.invoiceNumbers[0], message.urgencyLevel].filter(Boolean).join(" · ") || "—",
+    });
+    groups.set(message.mailboxId, group);
+  }
+  const mailboxes = [...groups.values()].sort((left, right) => left.name.localeCompare(right.name, "ru"));
+  if (mailboxes.length === 0) {
+    return <p className="rounded-xl border border-dashed border-line bg-card px-4 py-6 text-sm">Писем пока нет.</p>;
+  }
+  return (
+    <div className="grid gap-5">
+      {mailboxes.map((mailbox) => (
+        <section key={mailbox.id} id={`mailbox-${mailbox.id}`} className="overflow-hidden rounded-xl border border-line bg-card">
+          <header className="px-4 py-4 sm:px-5">
+            <Link className="text-lg font-semibold underline" href={`/mailboxes/${mailbox.id}`}>
+              {mailbox.name}
+            </Link>
+            <p className="mt-0.5 text-sm text-muted">{mailbox.address}</p>
+          </header>
+          <MailboxMessages panelId={`mailbox-${mailbox.id}`} items={mailbox.items} />
+        </section>
+      ))}
+    </div>
   );
 }

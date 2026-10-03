@@ -1,6 +1,11 @@
 import { randomUUID } from "crypto";
 import { prisma } from "@/lib/db";
 
+export async function isLockHeld(name: string): Promise<boolean> {
+  const row = await prisma.schedulerLock.findUnique({ where: { id: name } });
+  return Boolean(row && row.lockedUntil.getTime() > Date.now());
+}
+
 export async function withLock(name: string, ttlMs: number, fn: () => Promise<void>): Promise<boolean> {
   const owner = randomUUID();
   const now = new Date();

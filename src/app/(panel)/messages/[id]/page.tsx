@@ -3,8 +3,6 @@ import { notFound } from "next/navigation";
 import { Notice, PageTitle } from "@/components/shell";
 import { prisma } from "@/lib/db";
 import { labelStatus } from "@/lib/labels";
-import { renderTemplate } from "@/lib/replies/render";
-import { sendManualReply } from "@/server/ops";
 import { storedMessage } from "@/lib/mail/stored";
 
 export default async function MessagePage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ notice?: string }> }) {
@@ -16,11 +14,9 @@ export default async function MessagePage({ params, searchParams }: { params: Pr
       mailbox: true,
       matchedRule: true,
       notifications: true,
-      replies: { orderBy: { createdAt: "desc" } },
     },
   });
   if (!message) notFound();
-  const templates = await prisma.replyTemplate.findMany({ where: { mailboxId: message.mailboxId, active: true } });
   const normalized = storedMessage(message);
   return (
     <>
@@ -50,26 +46,8 @@ export default async function MessagePage({ params, searchParams }: { params: Pr
             `Дедлайн: ${message.earliestDeadline?.toLocaleString("ru-RU") || "нет"}`,
           ]} />
           <Info title="Уведомления" lines={message.notifications.map((item) => `${labelStatus(item.status)} · ${item.priority}`)} empty="нет" />
-          <Info title="Ответы" lines={message.replies.map((item) => `${item.kind}: ${labelStatus(item.status)}`)} empty="нет" />
         </aside>
       </div>
-      {message.mailbox.repliesEnabled ? (
-        <form action={sendManualReply} className="mt-6 grid gap-3 rounded-xl border border-line bg-card p-4">
-          <h2 className="font-semibold">Ручной ответ</h2>
-          <input type="hidden" name="messageId" value={message.id} />
-          <p className="text-sm text-muted">Кому: {message.replyTo[0] || message.fromEmail}. Тема начнётся с Re:, если её ещё нет. Входящее письмо не помечается и не перемещается.</p>
-          <label className="text-sm">
-            Подставить шаблон
-            <select className="mt-1" name="templateId" defaultValue="">
-              <option value="">без шаблона</option>
-              {templates.map((template) => <option key={template.id} value={template.id}>{template.name}</option>)}
-            </select>
-          </label>
-          <textarea name="body" rows={8} defaultValue={templates[0] ? renderTemplate(templates[0].bodyText, normalized, { mailboxName: message.mailbox.name, messageRef: message.messageIdHeader || message.id }) : ""} />
-          <button type="submit">Поставить ответ в очередь</button>
-          <p className="text-xs text-muted">Переменные: {"{{from_name}} {{from_email}} {{subject}} {{contract_numbers}} {{invoice_numbers}} {{amounts}} {{earliest_deadline}} {{attachments}} {{mailbox_name}}"}</p>
-        </form>
-      ) : null}
       <p className="mt-4 text-sm"><Link className="underline" href="/messages">К списку</Link></p>
     </>
   );

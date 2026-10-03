@@ -4,7 +4,7 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   outputFileTracingRoot: path.dirname(fileURLToPath(import.meta.url)),
-  serverExternalPackages: ["imapflow", "mailparser", "nodemailer", "iconv-lite"],
+  serverExternalPackages: ["imapflow", "mailparser", "iconv-lite"],
 };
 
 export default nextConfig;

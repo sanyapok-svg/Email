@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { MailboxNotifications, type NoticeRow } from "@/components/mailbox-notifications";
 import { Notice, PageTitle } from "@/components/shell";
 import { prisma } from "@/lib/db";
 import { labelStatus } from "@/lib/labels";
@@ -12,13 +13,28 @@ export default async function NotificationsPage({ searchParams }: { searchParams
       priority: params.priority || undefined,
       category: params.category || undefined,
     },
-    include: { mailbox: { select: { name: true } }, rule: { select: { name: true } } },
+    include: { mailbox: { select: { name: true, address: true } }, rule: { select: { name: true } } },
     orderBy: { createdAt: "desc" },
     take: 100,
   });
+  const groups = new Map<string, { id: string; name: string; address: string; items: NoticeRow[] }>();
+  for (const item of items) {
+    const group = groups.get(item.mailboxId) ?? { id: item.mailboxId, name: item.mailbox.name, address: item.mailbox.address, items: [] };
+    group.items.push({
+      id: item.id,
+      createdAt: item.createdAt.toLocaleString("ru-RU"),
+      ruleName: item.rule?.name ?? null,
+      status: labelStatus(item.status),
+      priority: item.priority,
+      due: `${item.responseDueAt?.toLocaleString("ru-RU") || "—"}${item.overdue ? " · просрочен" : ""}${item.dueRisk ? " · риск" : ""}`,
+    });
+    groups.set(item.mailboxId, group);
+  }
+  const mailboxes = [...groups.values()].sort((left, right) => left.name.localeCompare(right.name, "ru"));
+
   return (
     <>
-      <PageTitle title="Уведомления" text="Полный текст письма в Битрикс24 по умолчанию не передаётся." />
+      <PageTitle title="Уведомления" text="Уведомления собраны под своим ящиком. Список можно свернуть. Полный текст письма в Битрикс24 по умолчанию не передаётся." />
       <Notice text={params.notice} />
       <form className="mb-4 grid gap-2 md:grid-cols-4">
         <input name="status" defaultValue={params.status || ""} placeholder="статус" />
@@ -26,23 +42,21 @@ export default async function NotificationsPage({ searchParams }: { searchParams
         <input name="category" defaultValue={params.category || ""} placeholder="категория" />
         <button type="submit">Фильтр</button>
       </form>
-      <div className="overflow-x-auto rounded-xl border border-line">
-        <table>
-          <thead>
-            <tr><th>Когда</th><th>Ящик</th><th>Статус</th><th>Приоритет</th><th>Срок</th></tr>
-          </thead>
-          <tbody>
-            {items.map((item) => (
-              <tr key={item.id}>
-                <td><Link className="underline" href={`/notifications/${item.id}`}>{item.createdAt.toLocaleString("ru-RU")}</Link></td>
-                <td>{item.mailbox.name}<div className="text-xs text-muted">{item.rule?.name}</div></td>
-                <td>{labelStatus(item.status)}</td>
-                <td>{item.priority}</td>
-                <td>{item.responseDueAt?.toLocaleString("ru-RU") || "—"}{item.overdue ? " · просрочен" : ""}{item.dueRisk ? " · риск" : ""}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      <div className="grid gap-5">
+        {mailboxes.map((mailbox) => (
+          <section key={mailbox.id} id={`mailbox-${mailbox.id}`} className="overflow-hidden rounded-xl border border-line bg-card">
+            <header className="px-4 py-4 sm:px-5">
+              <Link className="text-lg font-semibold underline" href={`/mailboxes/${mailbox.id}`}>
+                {mailbox.name}
+              </Link>
+              <p className="mt-0.5 text-sm text-muted">{mailbox.address}</p>
+            </header>
+            <MailboxNotifications panelId={`mailbox-${mailbox.id}`} items={mailbox.items} />
+          </section>
+        ))}
+        {mailboxes.length === 0 ? (
+          <p className="rounded-xl border border-dashed border-line bg-card px-4 py-6 text-sm">Уведомлений пока нет.</p>
+        ) : null}
       </div>
     </>
   );

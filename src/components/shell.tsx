@@ -3,20 +3,27 @@ import { logout } from "@/server/auth";
 
 export function Shell({ children, pathname = "/" }: { children: React.ReactNode; pathname?: string }) {
   return (
-    <div className="min-h-screen md:grid md:grid-cols-[240px_1fr]">
-      <aside className="flex flex-col bg-pine text-paper">
-        <div className="px-5 py-6">
-          <p className="text-[11px] uppercase tracking-[0.18em] text-white/50">Yandex 360</p>
-          <p className="text-xl font-semibold">Входящие</p>
+    <div className="min-h-screen md:grid md:grid-cols-[240px_minmax(0,1fr)]">
+      <aside className="sticky top-0 z-30 bg-pine text-paper md:flex md:h-screen md:flex-col md:overflow-y-auto">
+        <div className="flex items-center justify-between gap-3 px-4 py-3 md:block md:px-5 md:py-6">
+          <div>
+            <p className="text-[11px] uppercase tracking-[0.18em] text-white/50">Yandex 360</p>
+            <p className="text-lg font-semibold leading-tight md:text-xl">Входящие</p>
+          </div>
+          <form action={logout} className="md:hidden">
+            <button className="secondary" type="submit">
+              Выйти
+            </button>
+          </form>
         </div>
         <Nav pathname={pathname} />
-        <form action={logout} className="mt-auto px-4 pt-4 pb-16">
+        <form action={logout} className="mt-auto hidden px-4 py-4 md:block">
           <button className="secondary w-full" type="submit">
             Выйти
           </button>
         </form>
       </aside>
-      <main className="px-5 py-7 md:px-8">{children}</main>
+      <main className="min-w-0 px-4 py-5 md:px-8 md:py-7">{children}</main>
     </div>
   );
 }
@@ -24,7 +31,7 @@ export function Shell({ children, pathname = "/" }: { children: React.ReactNode;
 export function PageTitle({ title, text }: { title: string; text?: string }) {
   return (
     <header className="mb-6">
-      <h1 className="text-2xl font-semibold">{title}</h1>
+      <h1 className="break-words text-xl font-semibold sm:text-2xl">{title}</h1>
       {text ? <p className="mt-1 max-w-3xl text-sm text-muted">{text}</p> : null}
     </header>
   );

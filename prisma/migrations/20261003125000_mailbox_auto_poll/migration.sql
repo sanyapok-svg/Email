@@ -1,0 +1,1 @@
+ALTER TABLE "mailboxes" ADD COLUMN "auto_poll" BOOLEAN NOT NULL DEFAULT true;

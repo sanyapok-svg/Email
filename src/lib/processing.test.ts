@@ -9,11 +9,11 @@ import { decodeMimePart } from "@/lib/mail/decode";
 import { emptyMessage } from "@/lib/mail/model";
 import { buildNormalizedMessage } from "@/lib/mail/pipeline";
 import { classifyStructure } from "@/lib/mail/structure";
+import { formatBitrixDigest } from "@/lib/b24/notice";
 import { decideMessage } from "@/lib/orchestration/decide";
+import { combineDigest } from "@/lib/orchestration/digest";
 import { firstMatchingRule } from "@/lib/rules/engine";
 import type { RuleRecord } from "@/lib/rules/types";
-import { renderTemplate, replySubject } from "@/lib/replies/render";
-import { autoReplySuppression } from "@/lib/replies/safety";
 import { htmlToText, splitQuotedText } from "@/lib/text/extract";
 import iconv from "iconv-lite";
 
@@ -95,7 +95,7 @@ describe("analysis", () => {
   });
 });
 
-describe("rules and replies", () => {
+describe("rules", () => {
   it("stops at the first matching rule", () => {
     const message = emptyMessage(receivedAt);
     message.subject = "Договор на подпись";
@@ -106,38 +106,60 @@ describe("rules and replies", () => {
     expect(firstMatchingRule([notify, exclude], message)?.id).toBe("exclude");
   });
 
-  it("builds one notification and suppresses a mailing-list reply", () => {
+  it("builds one notification", () => {
     const message = emptyMessage(receivedAt);
     message.subject = "Оплата";
     message.fromEmail = "noreply@news.example";
-    message.headers["list-unsubscribe"] = "<mailto:unsubscribe@news.example>";
     const matched = rule("notify", 1, { op: "all", conditions: [{ field: "subject", operator: "contains", value: "оплата" }] });
     matched.action.notificationEnabled = true;
-    matched.action.autoReplyEnabled = true;
-    matched.action.templateId = "tpl";
     const decision = decideMessage(message, [matched], context());
-    expect(decision.decision).toBe("notify_and_reply");
+    expect(decision.decision).toBe("notify");
     expect(decision.notification?.payload.subject).toBe("Оплата");
     expect(decision.notification?.payload).not.toHaveProperty("body");
-    expect(decision.reply?.status).toBe("suppressed");
-    expect(decision.reply?.idempotencyKey).toContain("auto:");
   });
 
-  it("renders a reply subject and variables without executing code", () => {
+  it("follows the rule when a notification falls outside working hours", () => {
     const message = emptyMessage(receivedAt);
-    message.subject = "Re: Договор";
-    message.fromDisplayName = "Анна";
-    message.contractNumbers = ["145"];
-    expect(replySubject(message.subject)).toBe("Re: Договор");
-    expect(replySubject("Счёт")).toBe("Re: Счёт");
-    expect(renderTemplate("{{from_name}} / {{contract_numbers}} {{process.exit}}", message)).toBe("Анна / 145 ");
+    message.subject = "Оплата";
+    const matched = rule("notify", 1, { op: "all", conditions: [{ field: "subject", operator: "contains", value: "оплата" }] });
+    matched.action.notificationEnabled = true;
+    matched.action.notifyOutsidePolicy = "cancel";
+    const night = DateTime.fromISO("2026-10-01T22:30:00", { zone: "Europe/Moscow" }).toUTC().toJSDate();
+    const decision = decideMessage(message, [matched], { ...context(), now: night, notifyOutsidePolicy: "defer" });
+    expect(decision.notification?.status).toBe("cancelled");
   });
 
-  it("suppresses auto-submitted mail", () => {
-    const message = emptyMessage();
-    message.fromEmail = "person@example.ru";
-    message.headers["auto-submitted"] = "auto-replied";
-    expect(autoReplySuppression(message)).toBe("auto-submitted");
+  it("writes each letter separately in one grouped notice", () => {
+    const text = formatBitrixDigest({
+      mailboxName: "Общий",
+      priority: "high",
+      category: "legal",
+      fields: ["subject", "from", "attachments", "text"],
+      letters: [
+        { subject: "Договор", from: "Анна <anna@client.ru>", responseDueLabel: "5 октября, 18:00", text: "Просим подписать" },
+        { subject: "Счёт", from: "Павел <pavel@client.ru>", responseDueLabel: "6 октября, 12:00", attachments: ["schet.pdf"] },
+      ],
+    });
+    expect(text).toContain("Новые письма на ящике «Общий»: 2");
+    expect(text).toContain("1. Тема: Договор");
+    expect(text).toContain("2. Тема: Счёт");
+    expect(text).toContain("Вложения: schet.pdf");
+    expect(text).toContain("Текст: Просим подписать");
+    expect(text).not.toContain("Телефоны:");
+    expect(text).not.toContain("Приоритет:");
+    expect(text).not.toContain("Ответить до:");
+    const combined = combineDigest(
+      [
+        piece("m1", "Договор", "Анна <anna@client.ru>"),
+        piece("m2", "Счёт", "Павел <pavel@client.ru>"),
+      ],
+      { mailboxId: "box", ruleId: "rule" },
+    );
+    expect(combined.status).toBe("pending");
+    expect(combined.payload.text).toContain("1. Тема: Договор");
+    expect(combined.payload.text).toContain("2. Тема: Счёт");
+    expect(String(combined.payload.subject)).toBe("Писем: 2");
+    expect(combined.idempotencyKey).toContain("m1");
   });
 });
 
@@ -177,7 +199,7 @@ describe("pipeline", () => {
       ],
     });
     expect(structure.textParts.map((part) => part.part)).toEqual(["1"]);
-    expect(structure.attachments[0]).toMatchObject({ name: "dogovor.pdf", extension: "pdf" });
+    expect(structure.attachments).toEqual([{ name: "dogovor.pdf", extension: "pdf" }]);
     const subject = `=?UTF-8?B?${Buffer.from("Договор", "utf8").toString("base64")}?=`;
     const message = await buildNormalizedMessage({
       headerBuffer: Buffer.from(`Subject: ${subject}\r\nFrom: Anna <anna@client.ru>\r\nMessage-ID: <m1@client.ru>\r\n`),
@@ -195,6 +217,26 @@ describe("pipeline", () => {
     expect(message.bodyNewText).toContain("Просим подписать");
     expect(message.bodyNewText).not.toContain("bad()");
     expect(message.attachmentNames).toEqual(["dogovor.pdf"]);
+    expect(message.attachmentExtensions).toEqual(["pdf"]);
+    expect(message).not.toHaveProperty("attachmentContent");
+  });
+
+  it("keeps only name and extension for heavy files and does not download them as text", () => {
+    const structure = classifyStructure({
+      type: "multipart/mixed",
+      childNodes: [
+        { part: "1", type: "text/plain", parameters: { charset: "utf-8" }, size: 200 },
+        { part: "2", type: "application/pdf", disposition: "attachment", dispositionParameters: { filename: "scan.pdf" }, size: 8_000_000 },
+        { part: "3", type: "application/zip", parameters: { name: "docs.zip" }, size: 20_000_000 },
+        { part: "4", type: "text/plain", disposition: "attachment", dispositionParameters: { filename: "notes.txt" }, size: 50_000 },
+      ],
+    });
+    expect(structure.textParts.map((part) => part.part)).toEqual(["1"]);
+    expect(structure.attachments).toEqual([
+      { name: "scan.pdf", extension: "pdf" },
+      { name: "docs.zip", extension: "zip" },
+      { name: "notes.txt", extension: "txt" },
+    ]);
   });
 });
 
@@ -206,7 +248,6 @@ function rule(id: string, position: number, conditions: RuleRecord["conditions"]
     position,
     active: true,
     category: "legal",
-    dryRun: false,
     conditions,
     action: {
       notificationEnabled: true,
@@ -214,11 +255,24 @@ function rule(id: string, position: number, conditions: RuleRecord["conditions"]
       responseHours: 8,
       useExtractedDeadline: false,
       recipientIds: ["lawyers"],
-      autoReplyEnabled: false,
-      templateId: null,
-      replyRespectWorkingHours: false,
       throttlingEnabled: true,
+      noticeGrouping: "each",
+      noticeFields: ["subject", "from"],
     },
+  };
+}
+
+function piece(messageId: string, subject: string, from: string) {
+  return {
+    messageId,
+    status: "pending",
+    priority: "high",
+    category: "legal",
+    responseDueAt: receivedAt,
+    overdue: false,
+    dueRisk: false,
+    scheduledAt: null,
+    payload: { subject, from, mailboxName: "Общий", recipients: ["lawyers"], attachments: [] },
   };
 }
 
@@ -230,26 +284,15 @@ function context() {
     uid: "15",
     schedule: { timezone: "Europe/Moscow", workDays: [1, 2, 3, 4, 5], intervals: [{ start: "09:00", end: "18:00" }], holidays: [] },
     notifyOutsidePolicy: "defer" as const,
-    replyOutsidePolicy: "send_now" as const,
-    globalDryRun: false,
-    mailboxDryRun: false,
-    blocklist: ["no-reply", "noreply"],
-    templateBody: "Получили {{subject}}",
     throttle: {
       ruleNotificationsLastHour: 0,
       notifyPerHour: 10,
       senderPaused: false,
       subjectPaused: false,
       domainPaused: false,
-      mailboxRepliesLastHour: 0,
-      replyPerHour: 10,
-      recipientRepliesLastDay: 0,
-      replyPerRecipientDay: 3,
     },
-    previewInNotification: false,
     previewChars: 200,
     globalMessageDedupe: false,
-    repliesEnabled: true,
   };
 }
 

@@ -8,14 +8,13 @@ import { testImapConnection, safeError } from "@/lib/imap/connector";
 import { pollMailbox } from "@/lib/orchestration/poll";
 import { starterRules } from "@/lib/rules/starter";
 import { withNotice } from "@/lib/http/notice";
-import { verifySmtp } from "@/lib/smtp/sender";
+import { POLL_INTERVALS, pollIntervalMinutes } from "@/lib/mail/check-settings";
 
 export async function saveMailbox(formData: FormData) {
   await requireUser();
   const id = String(formData.get("id") || "");
   const existing = id ? await prisma.mailbox.findUnique({ where: { id } }) : null;
   const imapPassword = String(formData.get("imapPassword") || "");
-  const smtpPassword = String(formData.get("smtpPassword") || "");
   if (!existing && !imapPassword) redirect(withNotice("/mailboxes/new", "Нужен пароль IMAP"));
   const data = {
     name: required(formData, "name"),
@@ -28,36 +27,78 @@ export async function saveMailbox(formData: FormData) {
     imapSecure: formData.get("imapSecure") === "on",
     imapUser: required(formData, "imapUser"),
     imapPasswordEnc: imapPassword ? encryptSecret(imapPassword) : existing?.imapPasswordEnc || "",
-    smtpHost: optional(formData, "smtpHost") || "smtp.yandex.com",
-    smtpPort: number(formData, "smtpPort", 465),
-    smtpSecure: formData.get("smtpSecure") === "on",
-    smtpUser: optional(formData, "smtpUser"),
-    smtpPasswordEnc: smtpPassword ? encryptSecret(smtpPassword) : existing?.smtpPasswordEnc,
-    smtpFromName: optional(formData, "smtpFromName"),
-    smtpFromAddress: optional(formData, "smtpFromAddress"),
-    repliesEnabled: formData.get("repliesEnabled") === "on",
+    repliesEnabled: false,
+    dryRun: false,
     batchSize: clamp(number(formData, "batchSize", 8), 1, 10),
-    pollIntervalSec: clamp(number(formData, "pollIntervalSec", 300), 60, 86400),
     bodyCharLimit: clamp(number(formData, "bodyCharLimit", 150000), 1000, 200000),
     entityListLimit: clamp(number(formData, "entityListLimit", 40), 5, 100),
-    workDays: csvNumbers(String(formData.get("workDays") || "1,2,3,4,5")),
-    workIntervals: parseIntervals(String(formData.get("workIntervals") || "09:00-18:00")),
-    holidays: csv(String(formData.get("holidays") || "")),
-    notifyOutsidePolicy: policy(formData, "notifyOutsidePolicy", "defer"),
-    replyOutsidePolicy: policy(formData, "replyOutsidePolicy", "send_now"),
-    dryRun: formData.get("dryRun") === "on",
     notifyPerHour: clamp(number(formData, "notifyPerHour", 30), 1, 1000),
-    replyPerHour: clamp(number(formData, "replyPerHour", 10), 1, 1000),
-    replyPerRecipientDay: clamp(number(formData, "replyPerRecipientDay", 3), 1, 100),
     senderPauseMinutes: clamp(number(formData, "senderPauseMinutes", 60), 0, 10080),
     subjectPauseMinutes: clamp(number(formData, "subjectPauseMinutes", 0), 0, 10080),
     domainPauseMinutes: clamp(number(formData, "domainPauseMinutes", 0), 0, 10080),
-    autoReplyBlocklist: csv(String(formData.get("autoReplyBlocklist") || "")),
   };
   const saved = existing
     ? await prisma.mailbox.update({ where: { id: existing.id }, data })
-    : await prisma.mailbox.create({ data });
+    : await prisma.mailbox.create({
+        data: {
+          ...data,
+          pollIntervalSec: 300,
+          workDays: [1, 2, 3, 4, 5],
+          workIntervals: [{ start: "09:00", end: "18:00" }],
+          holidays: [],
+          notifyOutsidePolicy: "defer",
+          replyOutsidePolicy: "send_now",
+        },
+      });
+  if (existing && existing.active !== data.active) {
+    await prisma.rule.updateMany({ where: { mailboxId: saved.id }, data: { active: data.active } });
+  }
   redirect(withNotice(`/mailboxes/${saved.id}`, "Сохранено"));
+}
+
+export async function saveMailboxCheck(formData: FormData) {
+  await requireUser();
+  const id = String(formData.get("id") || "");
+  const mailbox = await prisma.mailbox.findUnique({ where: { id }, select: { id: true } });
+  const returnTo = safeReturn(String(formData.get("returnTo") || ""), mailbox ? `/mailboxes#check-${id}` : "/mailboxes");
+  if (!mailbox) redirect(withNotice("/mailboxes", "Ящик не найден"));
+  const workDays = csvNumbers(String(formData.get("workDays") || "1,2,3,4,5"));
+  const workIntervals = parseIntervals(String(formData.get("workIntervals") || "09:00-18:00"));
+  await prisma.mailbox.update({
+    where: { id },
+    data: {
+      pollIntervalSec: chosenPollMinutes(number(formData, "pollIntervalMin", 5)) * 60,
+      workDays: workDays.length ? workDays : [1, 2, 3, 4, 5],
+      workIntervals: workIntervals.length ? workIntervals : [{ start: "09:00", end: "18:00" }],
+      holidays: csv(String(formData.get("holidays") || "")),
+    },
+  });
+  redirect(noticeTo(returnTo, "Проверка сохранена"));
+}
+
+export async function setMailboxAutoPoll(formData: FormData) {
+  await requireUser();
+  const id = String(formData.get("id") || "");
+  const enabled = formData.get("enabled") === "1";
+  const mailbox = await prisma.mailbox.findUnique({ where: { id }, select: { id: true } });
+  const returnTo = safeReturn(String(formData.get("returnTo") || ""), mailbox ? `/mailboxes#mailbox-${id}` : "/mailboxes");
+  if (!mailbox) redirect(withNotice("/mailboxes", "Ящик не найден"));
+  await prisma.mailbox.update({ where: { id }, data: { autoPoll: enabled } });
+  redirect(noticeTo(returnTo, enabled ? "Автопроверка включена" : "Автопроверка выключена"));
+}
+
+export async function setMailboxEnabled(formData: FormData) {
+  await requireUser();
+  const id = String(formData.get("id") || "");
+  const enabled = formData.get("enabled") === "1";
+  const mailbox = await prisma.mailbox.findUnique({ where: { id }, select: { id: true } });
+  const returnTo = safeReturn(String(formData.get("returnTo") || ""), mailbox ? `/mailboxes#mailbox-${id}` : "/mailboxes");
+  if (!mailbox) redirect(withNotice("/mailboxes", "Ящик не найден"));
+  await prisma.$transaction([
+    prisma.mailbox.update({ where: { id }, data: { active: enabled } }),
+    prisma.rule.updateMany({ where: { mailboxId: id }, data: { active: enabled } }),
+  ]);
+  redirect(noticeTo(returnTo, enabled ? "Ящик и все его правила включены" : "Ящик и все его правила выключены"));
 }
 
 export async function testMailboxImap(formData: FormData) {
@@ -81,36 +122,15 @@ export async function testMailboxImap(formData: FormData) {
   }
 }
 
-export async function testMailboxSmtp(formData: FormData) {
-  await requireUser();
-  const id = String(formData.get("id") || "");
-  const mailbox = await prisma.mailbox.findUnique({ where: { id } });
-  if (!mailbox?.smtpUser || !mailbox.smtpPasswordEnc) redirect(withNotice(`/mailboxes/${id}`, "SMTP не заполнен"));
-  try {
-    const { decryptSecret } = await import("@/lib/crypto/secrets");
-    await verifySmtp({
-      host: mailbox.smtpHost,
-      port: mailbox.smtpPort,
-      secure: mailbox.smtpSecure,
-      user: mailbox.smtpUser,
-      password: decryptSecret(mailbox.smtpPasswordEnc),
-      fromAddress: mailbox.smtpFromAddress || mailbox.address,
-    });
-    await prisma.mailbox.update({ where: { id }, data: { repliesPaused: false, smtpLastError: null } });
-    redirect(withNotice(`/mailboxes/${id}`, "SMTP в порядке, пауза ответов снята"));
-  } catch (error) {
-    rethrowRedirect(error);
-    const message = safeError(error, []);
-    await prisma.mailbox.update({ where: { id }, data: { smtpLastError: message } });
-    redirect(withNotice(`/mailboxes/${id}`, message));
-  }
-}
-
 export async function pollMailboxNow(formData: FormData) {
   await requireUser();
   const id = String(formData.get("id") || "");
+  const returnTo = safeReturn(String(formData.get("returnTo") || ""), `/mailboxes#mailbox-${id}`);
+  const mailbox = await prisma.mailbox.findUnique({ where: { id }, select: { active: true } });
+  if (!mailbox) redirect(withNotice("/mailboxes", "Ящик не найден"));
+  if (!mailbox.active) redirect(noticeTo(returnTo, "Ящик выключен, почта не проверялась"));
   await pollMailbox(id, { force: true });
-  redirect(withNotice(`/mailboxes/${id}`, "Проверка выполнена"));
+  redirect(noticeTo(returnTo, "Проверка выполнена"));
 }
 
 export async function installStarterRules(formData: FormData) {
@@ -130,14 +150,19 @@ export async function installStarterRules(formData: FormData) {
       dryRun: false,
     })),
   });
-  redirect(withNotice(`/rules?mailboxId=${mailboxId}`, "Базовые исключения добавлены"));
+  redirect(`${withNotice(`/mailboxes/${mailboxId}`, "Базовые исключения добавлены")}#rules`);
 }
 
-export async function resumeReplies(formData: FormData) {
-  await requireUser();
-  const id = String(formData.get("id") || "");
-  await prisma.mailbox.update({ where: { id }, data: { repliesPaused: false, smtpLastError: null } });
-  redirect(withNotice(`/mailboxes/${id}`, "Ответы возобновлены"));
+function safeReturn(value: string, fallback: string): string {
+  if (!value.startsWith("/") || value.startsWith("//") || value.includes("\\")) return fallback;
+  return value;
+}
+
+function noticeTo(pathWithHash: string, notice: string): string {
+  const hashAt = pathWithHash.indexOf("#");
+  const path = hashAt === -1 ? pathWithHash : pathWithHash.slice(0, hashAt);
+  const hash = hashAt === -1 ? "" : pathWithHash.slice(hashAt);
+  return `${withNotice(path, notice)}${hash}`;
 }
 
 function rethrowRedirect(error: unknown): void {
@@ -155,6 +180,10 @@ function required(formData: FormData, key: string): string {
 function optional(formData: FormData, key: string): string | null {
   const value = String(formData.get(key) || "").trim();
   return value || null;
+}
+
+function chosenPollMinutes(minutes: number): number {
+  return POLL_INTERVALS.some((item) => item.minutes === minutes) ? minutes : pollIntervalMinutes(minutes * 60);
 }
 
 function number(formData: FormData, key: string, fallback: number): number {
@@ -189,9 +218,4 @@ function parseIntervals(value: string): Array<{ start: string; end: string }> {
       return { start, end };
     })
     .filter((item) => item.start && item.end);
-}
-
-function policy(formData: FormData, key: string, fallback: string): string {
-  const value = String(formData.get(key) || fallback);
-  return ["send_now", "defer", "cancel"].includes(value) ? value : fallback;
 }

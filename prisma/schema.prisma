@@ -31,6 +31,7 @@ model Mailbox {
   repliesPaused         Boolean   @default(false) @map("replies_paused")
   batchSize             Int       @default(8) @map("batch_size")
   pollIntervalSec       Int       @default(300) @map("poll_interval_sec")
+  autoPoll              Boolean   @default(true) @map("auto_poll")
   bodyCharLimit         Int       @default(150000) @map("body_char_limit")
   entityListLimit       Int       @default(40) @map("entity_list_limit")
   workDays              Json      @default("[1,2,3,4,5]") @map("work_days")
@@ -246,6 +247,18 @@ model OutboundReply {
   @@index([status, nextAttemptAt])
   @@index([mailboxId, createdAt])
   @@map("outbound_replies")
+}
+
+model ServiceUser {
+  id           String   @id @default(cuid())
+  login        String   @unique
+  name         String
+  passwordHash String   @map("password_hash")
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  @@map("service_users")
 }
 
 model B24Recipient {

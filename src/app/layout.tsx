@@ -3,7 +3,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Входящие",
-  description: "Обработка входящей почты, уведомления и ответы",
+  description: "Обработка входящей почты и уведомления в Битрикс24",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

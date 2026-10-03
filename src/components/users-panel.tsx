@@ -63,7 +63,7 @@ export function UsersPanel({ users, notice }: { users: B24UserRow[]; notice?: st
   return (
     <section className="overflow-hidden rounded-2xl border border-line bg-card shadow-sm">
       <header className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-5 py-4">
-        <h1 className="text-xl font-semibold">Пользователи</h1>
+        <h1 className="text-xl font-semibold">Сотрудники Б24</h1>
         <div className="users-toolbar flex flex-wrap items-center gap-2">
           <button type="button" className="inline-flex items-center gap-2 rounded-full px-4 py-2" onClick={() => setDraft(emptyDraft())}>
             <PlusIcon />
@@ -97,7 +97,32 @@ export function UsersPanel({ users, notice }: { users: B24UserRow[]; notice?: st
           </button>
         </div>
       ) : null}
-      <div className="overflow-x-auto">
+      <ul className="divide-y divide-line md:hidden">
+        {visible.length === 0 ? (
+          <li className="px-5 py-8 text-center text-sm text-muted">
+            {users.length === 0 ? "Пользователей пока нет. Создайте первого, чтобы выбирать его в правиле." : "Ничего не найдено."}
+          </li>
+        ) : (
+          visible.map((user) => (
+            <li key={user.id} className={`grid gap-2 px-5 py-4 ${user.active ? "" : "text-muted"}`}>
+              <div>
+                <p className="font-medium">{user.name}</p>
+                <p className="text-sm text-muted">{user.login}</p>
+                <p className="text-sm">ID {user.number} · Б24 {user.externalId}{user.active ? "" : " · выключен"}</p>
+              </div>
+              <div className="flex gap-2">
+                <button type="button" className="secondary" onClick={() => setDraft(user)}>
+                  Изменить
+                </button>
+                <button type="button" className="secondary" onClick={() => setPendingDelete(user)}>
+                  Удалить
+                </button>
+              </div>
+            </li>
+          ))
+        )}
+      </ul>
+      <div className="hidden overflow-x-auto md:block">
         <table className="users-table">
           <thead>
             <tr>

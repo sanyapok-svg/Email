@@ -2,6 +2,7 @@ import { createHash, timingSafeEqual } from "crypto";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { signSession, verifySession } from "@/lib/auth/token";
+import { prisma } from "@/lib/db";
 
 export const SESSION_COOKIE = "en_session";
 
@@ -11,8 +12,8 @@ export function secretsMatch(left: string, right: string): boolean {
   return timingSafeEqual(a, b);
 }
 
-export async function createSession(username: string) {
-  const token = await signSession(username, requiredAuthSecret());
+export async function createSession(username: string, userId?: string) {
+  const token = await signSession(username, requiredAuthSecret(), 60 * 60 * 12, userId);
   const jar = await cookies();
   jar.set(SESSION_COOKIE, token, {
     httpOnly: true,
@@ -37,9 +38,14 @@ export async function currentUser() {
 }
 
 export async function requireUser() {
-  const user = await currentUser();
-  if (!user) redirect("/login");
-  return user;
+  const session = await currentUser();
+  if (!session) redirect("/login");
+  const user = session.id
+    ? await prisma.serviceUser.findUnique({ where: { id: session.id } })
+    : await prisma.serviceUser.findUnique({ where: { login: session.username.toLowerCase() } });
+  if ((session.id && !user) || (user && !user.active)) redirect("/logout");
+  if (user) return { username: user.login, id: user.id };
+  return session;
 }
 
 function requiredAuthSecret(): string {

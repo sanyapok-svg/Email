@@ -1,25 +1,16 @@
-import { UsersPanel } from "@/components/users-panel";
-import { prisma } from "@/lib/db";
+import { AccessUsersPanel } from "@/components/access-users-panel";
+import { ensureBootstrapUser, listServiceUsers } from "@/lib/auth/users";
 
 export default async function UsersPage({ searchParams }: { searchParams: Promise<{ notice?: string }> }) {
   const params = await searchParams;
-  const users = await prisma.b24Recipient.findMany({ orderBy: { number: "asc" } });
+  await ensureBootstrapUser();
+  const users = await listServiceUsers();
   return (
     <>
       <p className="mb-4 max-w-3xl text-sm text-muted">
-        Пользователи Битрикс24. Их можно выбрать получателями при создании правила — уведомление придёт на указанный ID.
+        Доступ к этой панели. У каждого свой логин и пароль. Выключенный пользователь войти не сможет.
       </p>
-      <UsersPanel
-        notice={params.notice}
-        users={users.map((user) => ({
-          id: user.id,
-          number: user.number,
-          login: user.login,
-          name: user.name,
-          externalId: user.externalId,
-          active: user.active,
-        }))}
-      />
+      <AccessUsersPanel notice={params.notice} users={users} />
     </>
   );
 }

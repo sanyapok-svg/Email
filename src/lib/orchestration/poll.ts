@@ -1,3 +1,4 @@
+import { randomUUID } from "crypto";
 import type { Mailbox, Prisma } from "@prisma/client";
 import { decryptSecret } from "@/lib/crypto/secrets";
 import { prisma } from "@/lib/db";
@@ -8,6 +9,7 @@ import type { NormalizedMessage } from "@/lib/mail/model";
 import { bumpMetrics } from "@/lib/metrics/counters";
 import { withLock } from "@/lib/locks";
 import { decideMessage, type DecideContext } from "@/lib/orchestration/decide";
+import { DIGEST_PART, flushDigestParts, holdDigest } from "@/lib/orchestration/digest";
 import { dispatchQueues } from "@/lib/queues/dispatch";
 import { firstMatchingRule } from "@/lib/rules/engine";
 import { parsePolicy, parseSchedule, parseStoredRule } from "@/lib/rules/parse";
@@ -16,7 +18,7 @@ import { getIntegrationConfig } from "@/lib/settings";
 const REAL_NOTICE = ["pending", "scheduled", "sending", "sent"];
 
 export async function pollDueMailboxes() {
-  const mailboxes = await prisma.mailbox.findMany({ where: { active: true }, select: { id: true, pollIntervalSec: true, lastCheckedAt: true } });
+  const mailboxes = await prisma.mailbox.findMany({ where: { active: true, autoPoll: true }, select: { id: true, pollIntervalSec: true, lastCheckedAt: true } });
   const now = Date.now();
   for (const mailbox of mailboxes) {
     const interval = Math.max(60, mailbox.pollIntervalSec) * 1000;
@@ -29,11 +31,13 @@ export async function pollMailbox(mailboxId: string, options: { force?: boolean 
   return withLock(`poll:${mailboxId}`, 90_000, async () => {
     const mailbox = await prisma.mailbox.findUnique({ where: { id: mailboxId } });
     if (!mailbox || !mailbox.active) return;
+    if (!options.force && !mailbox.autoPoll) return;
     if (!options.force && mailbox.lastCheckedAt) {
       const interval = Math.max(60, mailbox.pollIntervalSec) * 1000;
       if (Date.now() - mailbox.lastCheckedAt.getTime() < interval) return;
     }
     let deliver = false;
+    const pollToken = randomUUID();
     const password = decryptSecret(mailbox.imapPasswordEnc);
     const connector = new ImapConnector({
       host: mailbox.imapHost,
@@ -44,6 +48,7 @@ export async function pollMailbox(mailboxId: string, options: { force?: boolean 
     });
     deliver = true;
     try {
+      await flushDigestParts({ mailboxId: mailbox.id });
       await connector.connect();
       const status = await connector.examineInbox();
       if (!mailbox.initialized || mailbox.uidValidity !== status.uidValidity) {
@@ -64,7 +69,7 @@ export async function pollMailbox(mailboxId: string, options: { force?: boolean 
       const batch = Math.min(10, Math.max(1, mailbox.batchSize));
       const uids = await connector.searchUidsAfter(mailbox.lastUid ?? 0n, batch);
       for (const uid of uids) {
-        await processUid(connector, mailbox, uid, status.uidValidity);
+        await processUid(connector, mailbox, uid, status.uidValidity, pollToken);
       }
       await prisma.mailbox.update({
         where: { id: mailbox.id },
@@ -78,6 +83,13 @@ export async function pollMailbox(mailboxId: string, options: { force?: boolean 
       });
       logEvent("error", "imap.poll_failed", { mailboxId: mailbox.id, message });
     } finally {
+      if (deliver) {
+        try {
+          await flushDigestParts({ mailboxId: mailbox.id, pollToken });
+        } catch (error) {
+          logEvent("error", "notify.digest_failed", { mailboxId: mailbox.id, message: safeError(error, []) });
+        }
+      }
       await connector.close();
       if (deliver) {
         try {
@@ -90,7 +102,7 @@ export async function pollMailbox(mailboxId: string, options: { force?: boolean 
   });
 }
 
-async function processUid(connector: ImapConnector, mailbox: Mailbox, uid: bigint, uidValidity: bigint) {
+async function processUid(connector: ImapConnector, mailbox: Mailbox, uid: bigint, uidValidity: bigint, pollToken: string) {
   const started = Date.now();
   const existing = await prisma.processedMessage.findUnique({
     where: { mailboxId_uid_uidValidity: { mailboxId: mailbox.id, uid, uidValidity } },
@@ -110,7 +122,7 @@ async function processUid(connector: ImapConnector, mailbox: Mailbox, uid: bigin
     });
     if (fetched.truncatedBySize) normalized.bodyTruncated = true;
     if (!normalized.sentAt) normalized.sentAt = fetched.internalDate;
-    await persistMessage(mailbox, uid, uidValidity, normalized, Date.now() - started);
+    await persistMessage(mailbox, uid, uidValidity, normalized, Date.now() - started, pollToken);
   } catch (error) {
     const message = safeError(error, []);
     await prisma.processedMessage.create({
@@ -132,20 +144,17 @@ async function processUid(connector: ImapConnector, mailbox: Mailbox, uid: bigin
   }
 }
 
-async function persistMessage(mailbox: Mailbox, uid: bigint, uidValidity: bigint, message: NormalizedMessage, elapsedMs: number) {
+async function persistMessage(mailbox: Mailbox, uid: bigint, uidValidity: bigint, message: NormalizedMessage, elapsedMs: number, pollToken: string) {
   const config = await getIntegrationConfig();
   const rules = (await prisma.rule.findMany({ where: { mailboxId: mailbox.id } })).flatMap((row) => {
     const parsed = parseStoredRule(row);
     return parsed ? [parsed] : [];
   });
   const matched = firstMatchingRule(rules, message);
-  const template = matched?.action.templateId
-    ? await prisma.replyTemplate.findFirst({ where: { id: matched.action.templateId, mailboxId: mailbox.id, active: true } })
-    : null;
-  const ctx = await decideContext(mailbox, message, uid, config, template?.bodyText ?? null, matched?.id ?? null);
+  const ctx = await decideContext(mailbox, message, uid, config, matched?.id ?? null);
   const decision = decideMessage(message, rules, ctx);
   const maxAttempts = config.notifyMaxAttempts;
-  const replyAttempts = config.replyMaxAttempts;
+  const held = Boolean(decision.notification && decision.rule?.action.noticeGrouping === "digest");
 
   await prisma.$transaction(async (tx) => {
     const saved = await tx.processedMessage.create({
@@ -159,45 +168,23 @@ async function persistMessage(mailbox: Mailbox, uid: bigint, uidValidity: bigint
           messageId: saved.id,
           ruleId: decision.rule?.id,
           idempotencyKey: decision.notification.idempotencyKey,
-          status: decision.notification.status,
+          status: held ? DIGEST_PART : decision.notification.status,
           priority: decision.notification.priority,
           category: decision.notification.category,
           responseDueAt: decision.notification.responseDueAt,
           overdue: decision.notification.overdue,
           dueRisk: decision.notification.dueRisk,
-          payload: decision.notification.payload as Prisma.InputJsonValue,
+          payload: (held ? holdDigest(decision.notification, pollToken) : decision.notification.payload) as Prisma.InputJsonValue,
           scheduledAt: decision.notification.scheduledAt,
           maxAttempts,
-        },
-      });
-    }
-    if (decision.reply) {
-      const duplicateReply = await tx.outboundReply.findUnique({ where: { idempotencyKey: decision.reply.idempotencyKey } });
-      if (!duplicateReply) await tx.outboundReply.create({
-        data: {
-          mailboxId: mailbox.id,
-          messageId: saved.id,
-          ruleId: decision.rule?.id,
-          templateId: decision.reply.templateId,
-          kind: "auto",
-          idempotencyKey: decision.reply.idempotencyKey,
-          status: decision.reply.status,
-          toAddress: decision.reply.toAddress,
-          subject: decision.reply.subject,
-          bodyText: decision.reply.bodyText,
-          inReplyTo: decision.reply.inReplyTo,
-          references: decision.reply.references,
-          warnings: decision.reply.warnings,
-          suppressedReason: decision.reply.suppressedReason,
-          scheduledAt: decision.reply.scheduledAt,
-          maxAttempts: replyAttempts,
         },
       });
     }
     await tx.mailbox.update({ where: { id: mailbox.id }, data: { lastUid: uid } });
   });
 
-  await bumpMetrics(mailbox.id, mailbox.timezone, metricDelta(message, decision.decision, decision.notification?.status, decision.reply?.status, elapsedMs));
+  const noticeStatus = held ? DIGEST_PART : decision.notification?.status;
+  await bumpMetrics(mailbox.id, mailbox.timezone, metricDelta(message, decision.decision, noticeStatus, elapsedMs));
   logEvent("info", "mail.processed", {
     mailboxId: mailbox.id,
     uid: uid.toString(),
@@ -212,27 +199,17 @@ async function decideContext(
   message: NormalizedMessage,
   uid: bigint,
   config: Awaited<ReturnType<typeof getIntegrationConfig>>,
-  templateBody: string | null,
   ruleId: string | null,
 ): Promise<DecideContext> {
   const hourAgo = new Date(Date.now() - 60 * 60 * 1000);
-  const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
-  const recipient = message.replyTo[0] || message.fromEmail;
-  const [ruleNotificationsLastHour, mailboxRepliesLastHour, recipientRepliesLastDay, senderPaused, subjectPaused, domainPaused] =
-    await Promise.all([
-      prisma.notification.count({
-        where: { ruleId: ruleId ?? "none", createdAt: { gte: hourAgo }, status: { in: REAL_NOTICE } },
-      }),
-      prisma.outboundReply.count({
-        where: { mailboxId: mailbox.id, kind: "auto", createdAt: { gte: hourAgo }, status: { in: REAL_NOTICE } },
-      }),
-      prisma.outboundReply.count({
-        where: { mailboxId: mailbox.id, kind: "auto", toAddress: recipient, createdAt: { gte: dayAgo }, status: { in: REAL_NOTICE } },
-      }),
-      paused(mailbox.senderPauseMinutes, { mailboxId: mailbox.id, message: { fromEmail: message.fromEmail } }),
-      paused(mailbox.subjectPauseMinutes, { mailboxId: mailbox.id, message: { subjectNormalized: message.subjectNormalized } }),
-      paused(mailbox.domainPauseMinutes, { mailboxId: mailbox.id, message: { fromDomain: message.fromDomain } }),
-    ]);
+  const [ruleNotificationsLastHour, senderPaused, subjectPaused, domainPaused] = await Promise.all([
+    prisma.notification.count({
+      where: { ruleId: ruleId ?? "none", createdAt: { gte: hourAgo }, status: { in: REAL_NOTICE } },
+    }),
+    paused(mailbox.senderPauseMinutes, { mailboxId: mailbox.id, message: { fromEmail: message.fromEmail } }),
+    paused(mailbox.subjectPauseMinutes, { mailboxId: mailbox.id, message: { subjectNormalized: message.subjectNormalized } }),
+    paused(mailbox.domainPauseMinutes, { mailboxId: mailbox.id, message: { fromDomain: message.fromDomain } }),
+  ]);
   return {
     now: new Date(),
     mailboxId: mailbox.id,
@@ -240,26 +217,15 @@ async function decideContext(
     uid: uid.toString(),
     schedule: parseSchedule(mailbox),
     notifyOutsidePolicy: parsePolicy(mailbox.notifyOutsidePolicy),
-    replyOutsidePolicy: parsePolicy(mailbox.replyOutsidePolicy),
-    globalDryRun: config.globalDryRun,
-    mailboxDryRun: mailbox.dryRun,
-    blocklist: Array.isArray(mailbox.autoReplyBlocklist) ? mailbox.autoReplyBlocklist.map(String) : [],
-    templateBody,
     throttle: {
       ruleNotificationsLastHour,
       notifyPerHour: mailbox.notifyPerHour,
       senderPaused,
       subjectPaused,
       domainPaused,
-      mailboxRepliesLastHour,
-      replyPerHour: mailbox.replyPerHour,
-      recipientRepliesLastDay,
-      replyPerRecipientDay: mailbox.replyPerRecipientDay,
     },
-    previewInNotification: config.includeBodyPreview,
     previewChars: config.previewChars,
     globalMessageDedupe: config.globalMessageDedupe,
-    repliesEnabled: mailbox.repliesEnabled && !mailbox.repliesPaused,
   };
 }
 
@@ -338,13 +304,7 @@ function messageData(
   };
 }
 
-function metricDelta(
-  message: NormalizedMessage,
-  decision: string,
-  noticeStatus?: string,
-  replyStatus?: string,
-  elapsedMs = 0,
-) {
+function metricDelta(message: NormalizedMessage, decision: string, noticeStatus?: string, elapsedMs = 0) {
   return {
     received: 1,
     parsed: message.bodyError === "encrypted" ? 0 : 1,
@@ -359,13 +319,8 @@ function metricDelta(
     excluded: decision === "exclude" ? 1 : 0,
     skipped: decision === "skipped_no_rule" ? 1 : 0,
     notified: noticeStatus === "pending" || noticeStatus === "scheduled" ? 1 : 0,
-    dryRun: noticeStatus === "dry_run" || replyStatus === "dry_run" ? 1 : 0,
     throttledNotifications: noticeStatus === "throttled" ? 1 : 0,
-    throttledReplies: replyStatus === "throttled" ? 1 : 0,
-    suppressedReplies: replyStatus === "suppressed" ? 1 : 0,
     deferredNotifications: noticeStatus === "scheduled" ? 1 : 0,
-    deferredReplies: replyStatus === "scheduled" ? 1 : 0,
-    autoReplies: replyStatus === "pending" || replyStatus === "scheduled" ? 1 : 0,
     processingMs: elapsedMs,
     languages: { [message.language]: 1 },
     sentiments: { [message.sentiment]: 1 },

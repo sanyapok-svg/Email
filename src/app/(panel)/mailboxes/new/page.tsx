@@ -5,7 +5,7 @@ export default async function NewMailboxPage({ searchParams }: { searchParams: P
   const params = await searchParams;
   return (
     <>
-      <PageTitle title="Новый ящик" text="Для Yandex 360 обычно нужны imap.yandex.com:993 и smtp.yandex.com:465 с паролем приложения." />
+      <PageTitle title="Новый ящик" text="Для Yandex 360 обычно нужны imap.yandex.com:993 и пароль приложения." />
       <Notice text={params.notice} />
       <MailboxForm />
     </>

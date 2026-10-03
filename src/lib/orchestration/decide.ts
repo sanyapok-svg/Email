@@ -1,13 +1,11 @@
-import { formatBitrixNotice, formatDueLabel } from "@/lib/b24/notice";
+import { DEFAULT_NOTICE_FIELDS, formatBitrixNotice, formatDueLabel, type NoticeLetter } from "@/lib/b24/notice";
 import type { WorkSchedule } from "@/lib/hours/schedule";
 import { planByWorkingHours, type OutsidePolicy } from "@/lib/hours/schedule";
 import type { NormalizedMessage } from "@/lib/mail/model";
 import { firstMatchingRule } from "@/lib/rules/engine";
 import type { RuleRecord } from "@/lib/rules/types";
-import { autoReplySuppression } from "@/lib/replies/safety";
-import { renderTemplate, replyRecipients, replySubject } from "@/lib/replies/render";
 
-export type DecisionName = "exclude" | "notify" | "reply_only" | "notify_and_reply" | "skipped_no_rule";
+export type DecisionName = "exclude" | "notify" | "skipped_no_rule";
 export type QueueStatus = "pending" | "scheduled" | "dry_run" | "throttled" | "suppressed" | "cancelled";
 
 export type NotificationDraft = {
@@ -22,25 +20,10 @@ export type NotificationDraft = {
   payload: Record<string, unknown>;
 };
 
-export type ReplyDraft = {
-  status: QueueStatus;
-  toAddress: string;
-  subject: string;
-  bodyText: string;
-  inReplyTo: string | null;
-  references: string | null;
-  warnings: string[];
-  suppressedReason: string | null;
-  scheduledAt: Date | null;
-  idempotencyKey: string;
-  templateId: string | null;
-};
-
 export type Decision = {
   decision: DecisionName;
   rule: RuleRecord | null;
   notification: NotificationDraft | null;
-  reply: ReplyDraft | null;
 };
 
 export type DecideContext = {
@@ -50,61 +33,40 @@ export type DecideContext = {
   uid: string;
   schedule: WorkSchedule;
   notifyOutsidePolicy: OutsidePolicy;
-  replyOutsidePolicy: OutsidePolicy;
-  globalDryRun: boolean;
-  mailboxDryRun: boolean;
-  blocklist: string[];
-  templateBody: string | null;
   throttle: {
     ruleNotificationsLastHour: number;
     notifyPerHour: number;
     senderPaused: boolean;
     subjectPaused: boolean;
     domainPaused: boolean;
-    mailboxRepliesLastHour: number;
-    replyPerHour: number;
-    recipientRepliesLastDay: number;
-    replyPerRecipientDay: number;
   };
-  previewInNotification: boolean;
   previewChars: number;
   globalMessageDedupe: boolean;
-  repliesEnabled: boolean;
 };
 
 export function decideMessage(message: NormalizedMessage, rules: RuleRecord[], ctx: DecideContext): Decision {
   const rule = firstMatchingRule(rules, message);
-  if (!rule) return { decision: "skipped_no_rule", rule: null, notification: null, reply: null };
-  if (rule.type === "exclude") return { decision: "exclude", rule, notification: null, reply: null };
+  if (!rule) return { decision: "skipped_no_rule", rule: null, notification: null };
+  if (rule.type === "exclude") return { decision: "exclude", rule, notification: null };
 
-  const wantsNotice = rule.action.notificationEnabled;
-  const wantsReply = rule.action.autoReplyEnabled && Boolean(rule.action.templateId);
-  if (!wantsNotice && !wantsReply) return { decision: "skipped_no_rule", rule, notification: null, reply: null };
-
-  const dryRun = ctx.globalDryRun || ctx.mailboxDryRun || rule.dryRun;
-  const notification = wantsNotice ? buildNotification(message, rule, ctx, dryRun) : null;
-  const reply = wantsReply ? buildReply(message, rule, ctx, dryRun) : null;
-  const decision: DecisionName = wantsNotice && reply ? "notify_and_reply" : wantsNotice ? "notify" : "reply_only";
-  return { decision, rule, notification, reply };
+  if (!rule.action.notificationEnabled) return { decision: "skipped_no_rule", rule, notification: null };
+  return { decision: "notify", rule, notification: buildNotification(message, rule, ctx) };
 }
 
-function buildNotification(
-  message: NormalizedMessage,
-  rule: RuleRecord,
-  ctx: DecideContext,
-  dryRun: boolean,
-): NotificationDraft {
+function buildNotification(message: NormalizedMessage, rule: RuleRecord, ctx: DecideContext): NotificationDraft {
   const due = responseDue(message, rule, ctx.now);
-  const window = planByWorkingHours(ctx.now, ctx.schedule, ctx.notifyOutsidePolicy);
+  const window = planByWorkingHours(ctx.now, ctx.schedule, rule.action.notifyOutsidePolicy ?? ctx.notifyOutsidePolicy);
   const throttled =
     rule.action.throttlingEnabled &&
     (ctx.throttle.ruleNotificationsLastHour >= ctx.throttle.notifyPerHour ||
       ctx.throttle.senderPaused ||
       ctx.throttle.subjectPaused ||
       ctx.throttle.domainPaused);
-  const status: QueueStatus = dryRun ? "dry_run" : throttled ? "throttled" : window.status === "cancelled" ? "cancelled" : window.status;
-  const preview = ctx.previewInNotification ? (message.bodyNewText || message.bodyFullText).slice(0, ctx.previewChars) : undefined;
+  const status: QueueStatus = throttled ? "throttled" : window.status === "cancelled" ? "cancelled" : window.status;
   const from = message.fromDisplayName ? `${message.fromDisplayName} <${message.fromEmail}>` : message.fromEmail;
+  const fields = rule.action.noticeFields ?? DEFAULT_NOTICE_FIELDS;
+  const letter = noticeLetter(message, from, ctx.previewChars);
+  if (!fields.includes("text")) letter.text = "";
   return {
     status,
     priority: rule.action.priority,
@@ -121,13 +83,15 @@ function buildNotification(
       ruleId: rule.id,
       subject: message.subject,
       from,
+      noticeFields: fields,
+      letter,
       text: formatBitrixNotice({
         mailboxName: ctx.mailboxName,
-        subject: message.subject,
-        from,
         priority: rule.action.priority,
         category: rule.category,
         responseDueLabel: formatDueLabel(due.dueAt),
+        fields,
+        letter,
       }),
       priority: rule.action.priority,
       responseDueAt: due.dueAt?.toISOString() ?? null,
@@ -141,45 +105,26 @@ function buildNotification(
       contractNumbers: message.contractNumbers,
       invoiceNumbers: message.invoiceNumbers,
       amounts: message.amounts.map((item) => ({ amount: item.amount, currency: item.currency })),
-      ...(preview ? { preview } : {}),
     },
   };
 }
 
-function buildReply(message: NormalizedMessage, rule: RuleRecord, ctx: DecideContext, dryRun: boolean): ReplyDraft {
-  const warnings: string[] = [];
-  if (!message.messageId) warnings.push("missing-message-id");
-  const suppression = !ctx.repliesEnabled ? "replies-disabled" : autoReplySuppression(message, ctx.blocklist);
-  const policy = rule.action.replyRespectWorkingHours ? ctx.replyOutsidePolicy : "send_now";
-  const window = planByWorkingHours(ctx.now, ctx.schedule, policy);
-  const throttled =
-    rule.action.throttlingEnabled &&
-    (ctx.throttle.mailboxRepliesLastHour >= ctx.throttle.replyPerHour ||
-      ctx.throttle.recipientRepliesLastDay >= ctx.throttle.replyPerRecipientDay);
-  let status: QueueStatus = "pending";
-  if (suppression) status = "suppressed";
-  else if (dryRun) status = "dry_run";
-  else if (throttled) status = "throttled";
-  else if (window.status === "cancelled") status = "cancelled";
-  else status = window.status;
-  const references = [message.headers.references, message.messageId].filter(Boolean).join(" ").trim() || null;
+function noticeLetter(message: NormalizedMessage, from: string, previewChars: number): NoticeLetter {
+  const limit = previewChars > 0 ? previewChars : 400;
+  const text = (message.bodyNewText || message.bodyFullText).replace(/\s+/g, " ").trim().slice(0, limit);
+  const deadline = message.earliestDeadline ? formatDueLabel(new Date(message.earliestDeadline)) : "";
   return {
-    status,
-    toAddress: replyRecipients(message),
-    subject: replySubject(message.subject),
-    bodyText: renderTemplate(ctx.templateBody || "", message, {
-      category: rule.category,
-      priority: rule.action.priority,
-      mailboxName: ctx.mailboxName,
-      messageRef: message.messageId || ctx.uid,
-    }),
-    inReplyTo: message.messageId,
-    references,
-    warnings,
-    suppressedReason: suppression,
-    scheduledAt: status === "scheduled" ? window.scheduledAt : null,
-    idempotencyKey: `auto:${ctx.mailboxId}:${ctx.uid}:${rule.id}:${rule.action.templateId}`,
-    templateId: rule.action.templateId || null,
+    subject: message.subject,
+    from,
+    received: formatDueLabel(message.receivedAt),
+    text,
+    attachments: message.attachmentNames,
+    phones: message.phonesNormalized,
+    urls: message.urls.slice(0, 10),
+    contracts: message.contractNumbers,
+    invoices: message.invoiceNumbers,
+    amounts: message.amounts.map((item) => `${item.amount} ${item.currency || ""}`.trim()),
+    deadline: deadline === "не задан" ? "" : deadline,
   };
 }
 

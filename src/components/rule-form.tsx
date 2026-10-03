@@ -1,23 +1,23 @@
 "use client";
 
 import Link from "next/link";
-import { useActionState, useState } from "react";
+import { useState } from "react";
 import { B24NoticePreview, type NoticeRecipient } from "@/components/b24-notice-preview";
+import { DEFAULT_NOTICE_FIELDS, NOTICE_FIELDS } from "@/lib/b24/notice";
 import { OPERATORS, RULE_FIELDS } from "@/lib/rules/fields";
-import { saveRule, testRule } from "@/server/rules";
+import { saveRule } from "@/server/rules";
 
 type ConditionRow = { field: string; operator: string; value: string };
 
 export function RuleForm({
   mailboxId,
   mailboxes,
-  templates,
   recipients,
   initial,
+  defaults,
 }: {
   mailboxId?: string;
   mailboxes: Array<{ id: string; name: string }>;
-  templates: Array<{ id: string; name: string; mailboxId: string }>;
   recipients: Array<NoticeRecipient & { active: boolean }>;
   initial?: {
     id: string;
@@ -27,7 +27,6 @@ export function RuleForm({
     position: number;
     active: boolean;
     category: string | null;
-    dryRun: boolean;
     op: "all" | "any" | "none";
     conditions: ConditionRow[];
     notificationEnabled: boolean;
@@ -35,24 +34,28 @@ export function RuleForm({
     responseHours: number;
     useExtractedDeadline: boolean;
     recipientIds: string[];
-    autoReplyEnabled: boolean;
-    templateId: string;
-    replyRespectWorkingHours: boolean;
     throttlingEnabled: boolean;
+    notifyOutsidePolicy: string;
+    noticeGrouping: "each" | "digest";
+    noticeFields: string[];
+  };
+  defaults?: {
+    notifyOutsidePolicy?: string;
   };
 }) {
   const [op, setOp] = useState<"all" | "any" | "none">(initial?.op || "all");
   const [rows, setRows] = useState<ConditionRow[]>(initial?.conditions.length ? initial.conditions : [{ field: "subject", operator: "contains", value: "" }]);
-  const [selectedMailbox, setSelectedMailbox] = useState(initial?.mailboxId || mailboxId || mailboxes[0]?.id || "");
+  const selectedMailbox = initial?.mailboxId || mailboxId || mailboxes[0]?.id || "";
   const [ruleType, setRuleType] = useState(initial?.type || "notify");
   const [priority, setPriority] = useState(initial?.priority || "normal");
   const [category, setCategory] = useState(initial?.category || "");
   const [responseHours, setResponseHours] = useState(initial?.responseHours || 24);
   const [notifyOn, setNotifyOn] = useState(initial?.notificationEnabled ?? true);
   const [picked, setPicked] = useState<string[]>(initial?.recipientIds || []);
-  const [testState, testAction, pending] = useActionState(testRule, null);
+  const [outsidePolicy, setOutsidePolicy] = useState(initial?.notifyOutsidePolicy || defaults?.notifyOutsidePolicy || "defer");
+  const [noticeGrouping, setNoticeGrouping] = useState<"each" | "digest">(initial?.noticeGrouping || "each");
+  const [noticeFields, setNoticeFields] = useState<string[]>(initial ? initial.noticeFields : [...DEFAULT_NOTICE_FIELDS]);
   const conditions = JSON.stringify({ op, conditions: rows.map((row) => ({ ...row, value: row.value })) });
-  const visibleTemplates = templates.filter((item) => item.mailboxId === selectedMailbox);
   const mailboxName = mailboxes.find((item) => item.id === selectedMailbox)?.name || "";
   const chosen = recipients.filter((item) => picked.includes(item.id));
   const listed = recipients.filter((item) => item.active || picked.includes(item.id));
@@ -61,18 +64,15 @@ export function RuleForm({
     <div className="grid gap-6">
       <form action={saveRule} className="grid gap-4">
         {initial ? <input type="hidden" name="id" value={initial.id} /> : null}
+        <input type="hidden" name="mailboxId" value={selectedMailbox} />
         <input type="hidden" name="conditions" value={conditions} />
+        <p className="rounded-xl border border-line bg-card px-4 py-3 text-sm">
+          Правило ящика{" "}
+          <Link className="font-semibold underline" href={`/mailboxes/${selectedMailbox}#rules`}>
+            {mailboxName || "без имени"}
+          </Link>
+        </p>
         <div className="grid gap-3 md:grid-cols-2">
-          <label className="text-sm">
-            Ящик
-            <select className="mt-1" name="mailboxId" value={selectedMailbox} onChange={(event) => setSelectedMailbox(event.target.value)}>
-              {mailboxes.map((item) => (
-                <option key={item.id} value={item.id}>
-                  {item.name}
-                </option>
-              ))}
-            </select>
-          </label>
           <label className="text-sm">
             Название
             <input className="mt-1" name="name" defaultValue={initial?.name || ""} required />
@@ -81,7 +81,7 @@ export function RuleForm({
             Тип
             <select className="mt-1" name="type" value={ruleType} onChange={(event) => setRuleType(event.target.value)}>
               <option value="exclude">Исключение</option>
-              <option value="notify">Уведомление или ответ</option>
+              <option value="notify">Уведомление</option>
             </select>
           </label>
           <label className="text-sm">
@@ -104,17 +104,6 @@ export function RuleForm({
           <label className="text-sm">
             Срок ответа, часы
             <input className="mt-1" name="responseHours" type="number" value={responseHours} onChange={(event) => setResponseHours(Number(event.target.value))} />
-          </label>
-          <label className="text-sm">
-            Шаблон ответа
-            <select className="mt-1" name="templateId" defaultValue={initial?.templateId || ""}>
-              <option value="">не выбран</option>
-              {visibleTemplates.map((item) => (
-                <option key={item.id} value={item.id}>
-                  {item.name}
-                </option>
-              ))}
-            </select>
           </label>
         </div>
         <label className="text-sm">
@@ -153,10 +142,10 @@ export function RuleForm({
           </button>
         </div>
         <div className="grid items-start gap-4 lg:grid-cols-2">
-          <fieldset className="grid gap-2 rounded-xl border border-line bg-card p-4">
-            <legend className="px-1 text-sm font-semibold">Получатели в Битрикс24</legend>
+          <section className="grid min-w-0 content-start gap-2 rounded-xl border border-line bg-card p-4">
+            <h2 className="font-semibold">Получатели в Битрикс24</h2>
             <p className="text-sm text-muted">
-              Отметьте, кому уйдёт уведомление. Список ведётся в разделе <Link className="underline" href="/users">Пользователи</Link>.
+              Отметьте, кому уйдёт уведомление. Список ведётся в разделе <Link className="underline" href="/b24-users">Сотрудники Б24</Link>.
             </p>
             {listed.length === 0 ? (
               <p className="text-sm">Активных пользователей пока нет.</p>
@@ -185,7 +174,65 @@ export function RuleForm({
                 ))}
               </div>
             )}
-          </fieldset>
+            {ruleType === "exclude" ? (
+              <>
+                <input type="hidden" name="notifyOutsidePolicy" value={outsidePolicy} />
+                <input type="hidden" name="noticeGrouping" value={noticeGrouping} />
+                {noticeFields.map((id) => (
+                  <input key={id} type="hidden" name="noticeFields" value={id} />
+                ))}
+              </>
+            ) : (
+              <div className="mt-3 grid gap-3 border-t border-line pt-3">
+                <label className="text-sm">
+                  Уведомления вне рабочих часов
+                  <select className="mt-1" name="notifyOutsidePolicy" value={outsidePolicy} onChange={(event) => setOutsidePolicy(event.target.value)}>
+                    <option value="defer">отложить</option>
+                    <option value="send_now">отправить сразу</option>
+                    <option value="cancel">отменить</option>
+                  </select>
+                </label>
+                <label className="text-sm">
+                  Несколько писем за проверку
+                  <select
+                    className="mt-1"
+                    name="noticeGrouping"
+                    value={noticeGrouping}
+                    onChange={(event) => setNoticeGrouping(event.target.value === "digest" ? "digest" : "each")}
+                  >
+                    <option value="each">отдельное уведомление на каждое письмо</option>
+                    <option value="digest">одно уведомление со всеми письмами</option>
+                  </select>
+                </label>
+                <p className="text-sm text-muted">
+                  {noticeGrouping === "digest"
+                    ? "За одну проверку уходит одно сообщение всем выбранным сотрудникам. В нём каждое письмо расписано отдельно."
+                    : "За одну проверку каждое подходящее письмо уходит отдельным сообщением всем выбранным сотрудникам."}
+                </p>
+                <div className="text-sm">
+                  Что передать из письма
+                  <div className="mt-1 grid gap-1 sm:grid-cols-2">
+                    {NOTICE_FIELDS.map(([id, label]) => (
+                      <label key={id} className="flex items-center gap-2">
+                        <input
+                          style={{ width: "auto" }}
+                          type="checkbox"
+                          checked={noticeFields.includes(id)}
+                          onChange={() =>
+                            setNoticeFields((current) => (current.includes(id) ? current.filter((item) => item !== id) : [...current, id]))
+                          }
+                        />
+                        {label}
+                      </label>
+                    ))}
+                  </div>
+                  {noticeFields.map((id) => (
+                    <input key={id} type="hidden" name="noticeFields" value={id} />
+                  ))}
+                </div>
+              </div>
+            )}
+          </section>
           <B24NoticePreview
             enabled={ruleType !== "exclude" && notifyOn}
             mailboxName={mailboxName}
@@ -193,42 +240,18 @@ export function RuleForm({
             category={category}
             responseHours={responseHours}
             recipients={chosen}
+            grouping={noticeGrouping}
+            fields={noticeFields}
           />
         </div>
-        <div className="grid gap-2 md:grid-cols-3">
+        <div className="grid gap-2 md:grid-cols-2">
           <Check name="active" label="Правило активно" defaultChecked={initial?.active ?? true} />
-          <Check name="dryRun" label="Сухой прогон правила" defaultChecked={initial?.dryRun} />
           <Check name="notificationEnabled" label="Создавать уведомление" defaultChecked={initial?.notificationEnabled ?? true} onChange={setNotifyOn} />
-          <Check name="autoReplyEnabled" label="Автоматический ответ" defaultChecked={initial?.autoReplyEnabled} />
           <Check name="useExtractedDeadline" label="Срок из дедлайна письма" defaultChecked={initial?.useExtractedDeadline} />
-          <Check name="replyRespectWorkingHours" label="Ответ по рабочим часам" defaultChecked={initial?.replyRespectWorkingHours} />
           <Check name="throttlingEnabled" label="Троттлинг" defaultChecked={initial?.throttlingEnabled ?? true} />
         </div>
         <button type="submit">Сохранить правило</button>
       </form>
-      {initial ? (
-        <form action={testAction} className="grid gap-3 rounded-xl border border-line bg-card p-4">
-          <input type="hidden" name="id" value={initial.id} />
-          <h2 className="font-semibold">Проверка без отправки</h2>
-          <label className="text-sm">
-            ID сохранённого письма
-            <input className="mt-1" name="messageId" placeholder="можно оставить пустым и заполнить поля ниже" />
-          </label>
-          <div className="grid gap-3 md:grid-cols-2">
-            <input name="subject" placeholder="Тема" />
-            <input name="fromEmail" placeholder="from@example.com" />
-          </div>
-          <textarea name="body" rows={5} placeholder="Текст письма" />
-          <div className="grid gap-3 md:grid-cols-2">
-            <input name="headerName" placeholder="auto-submitted" />
-            <input name="headerValue" placeholder="auto-replied" />
-          </div>
-          <button className="secondary" type="submit" disabled={pending}>
-            {pending ? "Проверяем" : "Проверить правило"}
-          </button>
-          {testState?.text ? <p className="text-sm">{testState.text}</p> : null}
-        </form>
-      ) : null}
     </div>
   );
 

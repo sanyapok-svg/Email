@@ -13,6 +13,7 @@ export const STATUS_LABELS: Record<string, string> = {
   reply_only: "только ответ",
   notify_and_reply: "уведомление и ответ",
   skipped_no_rule: "пропущено без правила",
+  digest_part: "собирается в общее",
 };
 
 export function labelStatus(status: string): string {
