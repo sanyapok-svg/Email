@@ -78,6 +78,13 @@ export function priorityLabel(priority: string): string {
   return PRIORITY_LABELS[priority] || priority;
 }
 
+export function priorityCode(input: string | undefined): string | undefined {
+  const needle = input?.trim().toLowerCase();
+  if (!needle) return undefined;
+  const found = Object.entries(PRIORITY_LABELS).find(([code, label]) => code === needle || label === needle);
+  return found?.[0] ?? input?.trim();
+}
+
 export function formatDueLabel(date: Date | null): string {
   if (!date) return "не задан";
   return new Intl.DateTimeFormat("ru-RU", {

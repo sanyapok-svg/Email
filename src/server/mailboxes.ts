@@ -150,7 +150,7 @@ export async function installStarterRules(formData: FormData) {
       dryRun: false,
     })),
   });
-  redirect(`${withNotice(`/mailboxes/${mailboxId}`, "Базовые исключения добавлены")}#rules`);
+  redirect(noticeTo(`/mailboxes#mailbox-${mailboxId}`, "Базовые исключения добавлены"));
 }
 
 function safeReturn(value: string, fallback: string): string {

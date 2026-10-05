@@ -13,7 +13,7 @@ export default async function RulePage({ params, searchParams }: { params: Promi
   if (!rule) notFound();
   const [mailboxes, recipients, mailbox] = await Promise.all([
     prisma.mailbox.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true } }),
-    prisma.b24Recipient.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true, login: true, externalId: true, active: true } }),
+    prisma.b24Recipient.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true, login: true, externalId: true, active: true, dismissed: true } }),
     prisma.mailbox.findUnique({ where: { id: rule.mailboxId }, select: { notifyOutsidePolicy: true } }),
   ]);
   const group = isGroup(rule.conditions as ConditionGroup) ? (rule.conditions as ConditionGroup) : { op: "all" as const, conditions: [] };
@@ -21,7 +21,11 @@ export default async function RulePage({ params, searchParams }: { params: Promi
   const mailboxName = mailboxes.find((item) => item.id === rule.mailboxId)?.name;
   return (
     <>
-      <PageTitle title={rule.name} text={mailboxName ? `Правило ящика ${mailboxName}` : undefined} />
+      <PageTitle
+        title={rule.name}
+        text={mailboxName ? `Правило ящика ${mailboxName}` : undefined}
+        back={{ href: `/mailboxes#mailbox-${rule.mailboxId}`, label: "К правилам ящика" }}
+      />
       <Notice text={query.notice} />
       <RuleForm
         mailboxes={mailboxes}

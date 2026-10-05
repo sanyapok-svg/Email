@@ -268,6 +268,8 @@ model B24Recipient {
   name       String
   externalId String   @map("external_id")
   active     Boolean  @default(true)
+  dismissed  Boolean  @default(false)
+  absences   Json     @default("[]")
   createdAt  DateTime @default(now()) @map("created_at")
   updatedAt  DateTime @updatedAt @map("updated_at")
 

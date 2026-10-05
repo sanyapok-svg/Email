@@ -6,7 +6,7 @@ export default async function NewRulePage({ searchParams }: { searchParams: Prom
   const params = await searchParams;
   const [mailboxes, recipients, mailboxPolicy] = await Promise.all([
     prisma.mailbox.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true } }),
-    prisma.b24Recipient.findMany({ where: { active: true }, orderBy: { name: "asc" }, select: { id: true, name: true, login: true, externalId: true, active: true } }),
+    prisma.b24Recipient.findMany({ where: { active: true, dismissed: false }, orderBy: { name: "asc" }, select: { id: true, name: true, login: true, externalId: true, active: true, dismissed: true } }),
     params.mailboxId
       ? prisma.mailbox.findUnique({ where: { id: params.mailboxId }, select: { notifyOutsidePolicy: true } })
       : Promise.resolve(null),
@@ -17,6 +17,7 @@ export default async function NewRulePage({ searchParams }: { searchParams: Prom
       <PageTitle
         title={mailbox ? `Новое правило · ${mailbox.name}` : "Новое правило"}
         text="Пустая группа условий не совпадёт ни с чем. Для правила «всё остальное» добавьте оператор «всегда»."
+        back={mailbox ? { href: `/mailboxes#mailbox-${mailbox.id}`, label: "К правилам ящика" } : undefined}
       />
       <RuleForm
         mailboxId={mailbox?.id || params.mailboxId}

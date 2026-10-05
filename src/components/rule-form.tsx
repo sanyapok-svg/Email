@@ -18,7 +18,7 @@ export function RuleForm({
 }: {
   mailboxId?: string;
   mailboxes: Array<{ id: string; name: string }>;
-  recipients: Array<NoticeRecipient & { active: boolean }>;
+  recipients: Array<NoticeRecipient & { active: boolean; dismissed?: boolean }>;
   initial?: {
     id: string;
     mailboxId: string;
@@ -58,7 +58,7 @@ export function RuleForm({
   const conditions = JSON.stringify({ op, conditions: rows.map((row) => ({ ...row, value: row.value })) });
   const mailboxName = mailboxes.find((item) => item.id === selectedMailbox)?.name || "";
   const chosen = recipients.filter((item) => picked.includes(item.id));
-  const listed = recipients.filter((item) => item.active || picked.includes(item.id));
+  const listed = recipients.filter((item) => (item.active && !item.dismissed) || picked.includes(item.id));
 
   return (
     <div className="grid gap-6">
@@ -68,7 +68,7 @@ export function RuleForm({
         <input type="hidden" name="conditions" value={conditions} />
         <p className="rounded-xl border border-line bg-card px-4 py-3 text-sm">
           Правило ящика{" "}
-          <Link className="font-semibold underline" href={`/mailboxes/${selectedMailbox}#rules`}>
+          <Link className="font-semibold underline" href={`/mailboxes#mailbox-${selectedMailbox}`}>
             {mailboxName || "без имени"}
           </Link>
         </p>
@@ -167,7 +167,7 @@ export function RuleForm({
                       <span className="font-medium">{item.name}</span>
                       <span className="block text-muted">
                         {item.login} · ID Б24 {item.externalId}
-                        {item.active ? "" : " · выключен"}
+                        {item.dismissed ? " · уволен" : item.active ? "" : " · выключен"}
                       </span>
                     </span>
                   </label>

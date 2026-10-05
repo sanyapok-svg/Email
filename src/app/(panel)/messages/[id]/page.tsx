@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Notice, PageTitle } from "@/components/shell";
 import { prisma } from "@/lib/db";
+import { priorityLabel } from "@/lib/b24/notice";
 import { labelStatus } from "@/lib/labels";
 import { storedMessage } from "@/lib/mail/stored";
 
@@ -45,7 +46,7 @@ export default async function MessagePage({ params, searchParams }: { params: Pr
             `Суммы: ${normalized.amounts.map((item) => `${item.amount} ${item.currency || ""}`).join(", ") || "нет"}`,
             `Дедлайн: ${message.earliestDeadline?.toLocaleString("ru-RU") || "нет"}`,
           ]} />
-          <Info title="Уведомления" lines={message.notifications.map((item) => `${labelStatus(item.status)} · ${item.priority}`)} empty="нет" />
+          <Info title="Уведомления" lines={message.notifications.map((item) => `${labelStatus(item.status)} · ${priorityLabel(item.priority)}`)} empty="нет" />
         </aside>
       </div>
       <p className="mt-4 text-sm"><Link className="underline" href="/messages">К списку</Link></p>

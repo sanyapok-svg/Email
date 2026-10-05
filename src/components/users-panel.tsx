@@ -1,6 +1,10 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { absenceListNote, type Absence } from "@/lib/b24/absences";
+import type { DismissalNotice } from "@/lib/b24/dismiss";
+import { AbsenceEditor } from "@/components/absence-editor";
+import { DismissEmployeeForm } from "@/components/dismiss-employee";
 import { deleteB24User, saveB24User } from "@/server/ops";
 
 export type B24UserRow = {
@@ -10,6 +14,9 @@ export type B24UserRow = {
   name: string;
   externalId: string;
   active: boolean;
+  dismissed: boolean;
+  absences: Absence[];
+  notices: DismissalNotice[];
 };
 
 const PAGE_SIZES = [15, 30, 50];
@@ -21,9 +28,11 @@ type Draft = {
   name: string;
   externalId: string;
   active: boolean;
+  dismissed: boolean;
+  absences: Absence[];
 };
 
-const emptyDraft = (): Draft => ({ id: "", login: "", name: "", externalId: "", active: true });
+const emptyDraft = (): Draft => ({ id: "", login: "", name: "", externalId: "", active: true, dismissed: false, absences: [] });
 
 export function UsersPanel({ users, notice }: { users: B24UserRow[]; notice?: string }) {
   const [filterOpen, setFilterOpen] = useState(false);
@@ -33,6 +42,8 @@ export function UsersPanel({ users, notice }: { users: B24UserRow[]; notice?: st
   const [page, setPage] = useState(1);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [pendingDelete, setPendingDelete] = useState<B24UserRow | null>(null);
+  const [pendingDismiss, setPendingDismiss] = useState<B24UserRow | null>(null);
+  const colleagues = users.filter((user) => user.active && !user.dismissed).map((user) => ({ id: user.id, name: user.name }));
 
   const filtered = useMemo(() => {
     const rows = users.filter((user) => {
@@ -51,6 +62,7 @@ export function UsersPanel({ users, notice }: { users: B24UserRow[]; notice?: st
     return rows;
   }, [users, query, sort]);
 
+  const names = useMemo(() => new Map(users.map((user) => [user.id, user.name])), [users]);
   const pages = Math.max(1, Math.ceil(filtered.length / pageSize));
   const current = Math.min(page, pages);
   const visible = filtered.slice((current - 1) * pageSize, current * pageSize);
@@ -108,12 +120,18 @@ export function UsersPanel({ users, notice }: { users: B24UserRow[]; notice?: st
               <div>
                 <p className="font-medium">{user.name}</p>
                 <p className="text-sm text-muted">{user.login}</p>
-                <p className="text-sm">ID {user.number} · Б24 {user.externalId}{user.active ? "" : " · выключен"}</p>
+                <p className="text-sm">ID {user.number} · Б24 {user.externalId}{statusLabel(user)}</p>
+                <AbsenceNote text={absenceListNote(user.absences, names)} />
               </div>
               <div className="flex gap-2">
-                <button type="button" className="secondary" onClick={() => setDraft(user)}>
+                <button type="button" className="secondary" onClick={() => setDraft(copyUser(user))}>
                   Изменить
                 </button>
+                {user.dismissed ? null : (
+                  <button type="button" className="secondary" onClick={() => setPendingDismiss(user)}>
+                    Уволить
+                  </button>
+                )}
                 <button type="button" className="secondary" onClick={() => setPendingDelete(user)}>
                   Удалить
                 </button>
@@ -130,7 +148,7 @@ export function UsersPanel({ users, notice }: { users: B24UserRow[]; notice?: st
               <Sortable label="Логин" column="login" sort={sort} onSort={toggleSort} />
               <Sortable label="ФИО" column="name" sort={sort} onSort={toggleSort} />
               <Sortable label="ID Б24" column="externalId" sort={sort} onSort={toggleSort} />
-              <th className="w-28" />
+              <th className="w-36" />
             </tr>
           </thead>
           <tbody>
@@ -147,14 +165,20 @@ export function UsersPanel({ users, notice }: { users: B24UserRow[]; notice?: st
                   <td>{user.login}</td>
                   <td>
                     {user.name}
-                    {user.active ? "" : " · выключен"}
+                    {statusLabel(user)}
+                    <AbsenceNote text={absenceListNote(user.absences, names)} />
                   </td>
                   <td>{user.externalId}</td>
                   <td>
                     <div className="flex justify-end gap-1">
-                      <button type="button" className="bare" aria-label={`Изменить ${user.name}`} onClick={() => setDraft(user)}>
+                      <button type="button" className="bare" aria-label={`Изменить ${user.name}`} onClick={() => setDraft(copyUser(user))}>
                         <PencilIcon />
                       </button>
+                      {user.dismissed ? null : (
+                        <button type="button" className="bare" aria-label={`Уволить ${user.name}`} onClick={() => setPendingDismiss(user)}>
+                          <DismissIcon />
+                        </button>
+                      )}
                       <button type="button" className="bare" aria-label={`Удалить ${user.name}`} onClick={() => setPendingDelete(user)}>
                         <TrashIcon />
                       </button>
@@ -191,9 +215,10 @@ export function UsersPanel({ users, notice }: { users: B24UserRow[]; notice?: st
         </button>
       </footer>
       {draft ? (
-        <Overlay title={draft.id ? "Редактирование пользователя" : "Создание пользователя"} onClose={() => setDraft(null)}>
+        <Overlay title={draft.id ? "Редактирование пользователя" : "Создание пользователя"} onClose={() => setDraft(null)} wide>
           <form action={saveB24User} className="grid gap-3">
             {draft.id ? <input type="hidden" name="id" value={draft.id} /> : null}
+            <input type="hidden" name="absences" value={JSON.stringify(draft.absences)} />
             <label className="text-sm">
               Логин
               <input className="mt-1" name="login" type="email" required defaultValue={draft.login} placeholder="name@company.ru" />
@@ -206,10 +231,20 @@ export function UsersPanel({ users, notice }: { users: B24UserRow[]; notice?: st
               ID Б24
               <input className="mt-1" name="externalId" required inputMode="numeric" defaultValue={draft.externalId} placeholder="7" />
             </label>
-            <label className="flex items-center gap-2 text-sm">
-              <input style={{ width: "auto" }} type="checkbox" name="active" defaultChecked={draft.active} />
-              Активен и доступен в правилах
-            </label>
+            {draft.dismissed ? (
+              <p className="text-sm text-muted">Сотрудник уволен и не получает уведомления.</p>
+            ) : (
+              <label className="flex items-center gap-2 text-sm">
+                <input style={{ width: "auto" }} type="checkbox" name="active" defaultChecked={draft.active} />
+                Активен и доступен в правилах
+              </label>
+            )}
+            <AbsenceEditor
+              absences={draft.absences}
+              selfId={draft.id}
+              users={users.map((user) => ({ id: user.id, name: user.name, active: user.active, dismissed: user.dismissed }))}
+              onChange={(absences) => setDraft((current) => (current ? { ...current, absences } : current))}
+            />
             <div className="mt-2 flex justify-end gap-2">
               <button type="button" className="secondary" onClick={() => setDraft(null)}>
                 Отмена
@@ -219,10 +254,19 @@ export function UsersPanel({ users, notice }: { users: B24UserRow[]; notice?: st
           </form>
         </Overlay>
       ) : null}
+      {pendingDismiss ? (
+        <Overlay title={`Уволить ${pendingDismiss.name}`} onClose={() => setPendingDismiss(null)} wide>
+          <DismissEmployeeForm
+            user={pendingDismiss}
+            colleagues={colleagues.filter((person) => person.id !== pendingDismiss.id)}
+            onClose={() => setPendingDismiss(null)}
+          />
+        </Overlay>
+      ) : null}
       {pendingDelete ? (
         <Overlay title="Удалить пользователя" onClose={() => setPendingDelete(null)}>
           <p className="text-sm">
-            {pendingDelete.name} больше нельзя будет выбрать в новых правилах. Уже сохранённые правила останутся как есть.
+            {pendingDelete.name} будет удалён из получателей и из списков замещающих. Если он был единственным получателем, такое уведомление выключится, а неотправленные письма по нему отменятся.
           </p>
           <form action={deleteB24User} className="mt-4 flex justify-end gap-2">
             <input type="hidden" name="id" value={pendingDelete.id} />
@@ -240,6 +284,29 @@ export function UsersPanel({ users, notice }: { users: B24UserRow[]; notice?: st
     setQuery((prev) => ({ ...prev, [key]: value }));
     setPage(1);
   }
+}
+
+function copyUser(user: B24UserRow): Draft {
+  return {
+    id: user.id,
+    login: user.login,
+    name: user.name,
+    externalId: user.externalId,
+    active: user.active,
+    dismissed: user.dismissed,
+    absences: user.absences.map((absence) => ({ ...absence, substituteIds: [...absence.substituteIds] })),
+  };
+}
+
+function statusLabel(user: { active: boolean; dismissed: boolean }): string {
+  if (user.dismissed) return " · уволен";
+  if (!user.active) return " · выключен";
+  return "";
+}
+
+function AbsenceNote({ text }: { text: string }) {
+  if (!text) return null;
+  return <p className="mt-0.5 text-xs text-muted">{text}</p>;
 }
 
 function Sortable({
@@ -266,10 +333,10 @@ function Sortable({
   );
 }
 
-function Overlay({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
+function Overlay({ title, onClose, wide, children }: { title: string; onClose: () => void; wide?: boolean; children: React.ReactNode }) {
   return (
-    <div className="fixed inset-0 z-20 grid place-items-center bg-ink/40 px-4" role="presentation" onMouseDown={onClose}>
-      <div className="w-full max-w-md rounded-2xl border border-line bg-card p-5 shadow-lg" role="dialog" aria-modal="true" aria-label={title} onMouseDown={(event) => event.stopPropagation()}>
+    <div className="fixed inset-0 z-20 grid items-start justify-center overflow-y-auto bg-ink/40 px-4 py-8" role="presentation" onMouseDown={onClose}>
+      <div className={`w-full ${wide ? "max-w-xl" : "max-w-md"} rounded-2xl border border-line bg-card p-5 shadow-lg`} role="dialog" aria-modal="true" aria-label={title} onMouseDown={(event) => event.stopPropagation()}>
         <h2 className="mb-4 text-lg font-semibold">{title}</h2>
         {children}
       </div>
@@ -298,6 +365,16 @@ function PencilIcon() {
     <svg width="15" height="15" viewBox="0 0 15 15" fill="none" aria-hidden>
       <path d="M8.4 3.2 11.8 6.6 5.2 13.2H1.8V9.8L8.4 3.2Z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" />
       <path d="M7.2 4.4 10.6 7.8" stroke="currentColor" strokeWidth="1.2" />
+    </svg>
+  );
+}
+
+function DismissIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 15 15" fill="none" aria-hidden>
+      <circle cx="5.6" cy="4.2" r="1.9" stroke="currentColor" strokeWidth="1.2" />
+      <path d="M2.1 12.3c.5-2 1.8-3 3.5-3s3 1 3.5 3" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+      <path d="M10.4 6.1 13 8.7M13 6.1 10.4 8.7" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
     </svg>
   );
 }

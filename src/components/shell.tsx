@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { Nav } from "@/components/nav";
 import { logout } from "@/server/auth";
 
@@ -28,9 +29,14 @@ export function Shell({ children, pathname = "/" }: { children: React.ReactNode;
   );
 }
 
-export function PageTitle({ title, text }: { title: string; text?: string }) {
+export function PageTitle({ title, text, back }: { title: string; text?: string; back?: { href: string; label: string } }) {
   return (
     <header className="mb-6">
+      {back ? (
+        <Link className="mb-2 inline-block text-sm underline" href={back.href}>
+          {back.label}
+        </Link>
+      ) : null}
       <h1 className="break-words text-xl font-semibold sm:text-2xl">{title}</h1>
       {text ? <p className="mt-1 max-w-3xl text-sm text-muted">{text}</p> : null}
     </header>

@@ -1,4 +1,5 @@
 import type { Prisma } from "@prisma/client";
+import { calendarDay, coveringSubstituteIds, readAbsences, resolveRecipients, type RecipientPerson } from "@/lib/b24/absences";
 import { deliverToBitrix } from "@/lib/b24/adapter";
 import { decryptSecret } from "@/lib/crypto/secrets";
 import { prisma } from "@/lib/db";
@@ -27,14 +28,17 @@ async function dispatchNotifications() {
   for (const item of items) {
     const claimed = await prisma.notification.updateMany({ where: { id: item.id, status: item.status }, data: { status: "sending" } });
     if (claimed.count !== 1) continue;
-    const payload = await withBitrixUsers(item.payload as Prisma.JsonObject);
+    const payload = await withBitrixUsers(item.payload as Prisma.JsonObject, now, item.mailbox.timezone);
     const result = await deliverToBitrix({
       mode: config.b24Mode === "webhook" ? "webhook" : "mock",
       webhookUrl: webhook,
       payload,
     });
     if (result.ok) {
-      await prisma.notification.update({ where: { id: item.id }, data: { status: "sent", sentAt: new Date(), lastError: null } });
+      await prisma.notification.update({
+        where: { id: item.id },
+        data: { status: "sent", sentAt: new Date(), lastError: null, payload },
+      });
       const latency = Date.now() - item.message.receivedAt.getTime();
       await bumpMetrics(item.mailboxId, item.mailbox.timezone, { notifyLatencyMs: Math.max(0, latency) });
       logEvent("info", "notify.sent", { mailboxId: item.mailboxId, notificationId: item.id, mocked: result.mocked });
@@ -70,20 +74,45 @@ function readyWhere(now: Date) {
   };
 }
 
-async function withBitrixUsers(payload: Prisma.JsonObject): Promise<Prisma.JsonObject> {
+async function withBitrixUsers(payload: Prisma.JsonObject, now: Date, timeZone: string): Promise<Prisma.JsonObject> {
   const ids = Array.isArray(payload.recipients) ? payload.recipients.map(String) : [];
   if (!ids.length) return payload;
-  const people = await prisma.b24Recipient.findMany({
-    where: { id: { in: ids }, active: true },
-    select: { name: true, login: true, externalId: true },
+  const selectedRows = await prisma.b24Recipient.findMany({
+    where: { id: { in: ids } },
+    select: { id: true, name: true, login: true, externalId: true, active: true, absences: true },
   });
+  const selectedById = new Map(selectedRows.map((row) => [row.id, toPerson(row)]));
+  const selected = ids.flatMap((id) => {
+    const person = selectedById.get(id);
+    return person ? [person] : [];
+  });
+  const day = calendarDay(now, timeZone);
+  const extraIds = coveringSubstituteIds(selected, day).filter((id) => !selectedById.has(id));
+  const extraRows = extraIds.length
+    ? await prisma.b24Recipient.findMany({
+        where: { id: { in: extraIds } },
+        select: { id: true, name: true, login: true, externalId: true, active: true, absences: true },
+      })
+    : [];
+  const directory = new Map<string, RecipientPerson>([...selected, ...extraRows.map(toPerson)].map((person) => [person.id, person]));
   return {
     ...payload,
-    b24Users: people.map((person) => ({
+    b24Users: resolveRecipients(selected, directory, day).map((person) => ({
       name: person.name,
       login: person.login,
       externalId: person.externalId,
     })),
+  };
+}
+
+function toPerson(row: { id: string; name: string; login: string; externalId: string; active: boolean; absences: Prisma.JsonValue }): RecipientPerson {
+  return {
+    id: row.id,
+    name: row.name,
+    login: row.login,
+    externalId: row.externalId,
+    active: row.active,
+    absences: readAbsences(row.absences),
   };
 }
 

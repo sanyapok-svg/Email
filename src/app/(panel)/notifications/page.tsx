@@ -2,15 +2,16 @@ import Link from "next/link";
 import { MailboxNotifications, type NoticeRow } from "@/components/mailbox-notifications";
 import { Notice, PageTitle } from "@/components/shell";
 import { prisma } from "@/lib/db";
-import { labelStatus } from "@/lib/labels";
+import { priorityCode, priorityLabel } from "@/lib/b24/notice";
+import { labelStatus, statusCode } from "@/lib/labels";
 
 export default async function NotificationsPage({ searchParams }: { searchParams: Promise<Record<string, string | undefined>> }) {
   const params = await searchParams;
   const items = await prisma.notification.findMany({
     where: {
-      status: params.status || undefined,
+      status: statusCode(params.status),
       mailboxId: params.mailboxId || undefined,
-      priority: params.priority || undefined,
+      priority: priorityCode(params.priority),
       category: params.category || undefined,
     },
     include: { mailbox: { select: { name: true, address: true } }, rule: { select: { name: true } } },
@@ -25,7 +26,7 @@ export default async function NotificationsPage({ searchParams }: { searchParams
       createdAt: item.createdAt.toLocaleString("ru-RU"),
       ruleName: item.rule?.name ?? null,
       status: labelStatus(item.status),
-      priority: item.priority,
+      priority: priorityLabel(item.priority),
       due: `${item.responseDueAt?.toLocaleString("ru-RU") || "—"}${item.overdue ? " · просрочен" : ""}${item.dueRisk ? " · риск" : ""}`,
     });
     groups.set(item.mailboxId, group);

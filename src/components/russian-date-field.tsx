@@ -24,11 +24,13 @@ export function RussianDateField({
   label,
   defaultValue = "",
   align = "start",
+  onChange,
 }: {
   name: string;
   label: string;
   defaultValue?: string;
   align?: "start" | "end";
+  onChange?: (iso: string) => void;
 }) {
   const initial = parseIso(defaultValue);
   const [value, setValue] = useState<Date | null>(initial);
@@ -37,6 +39,13 @@ export function RussianDateField({
   const [view, setView] = useState(() => startOfMonth(initial ?? new Date()));
   const rootRef = useRef<HTMLDivElement>(null);
   const dialogId = useId();
+
+  useEffect(() => {
+    const next = parseIso(defaultValue);
+    setValue(next);
+    setText(next ? formatRu(next) : "");
+    if (next) setView(startOfMonth(next));
+  }, [defaultValue]);
 
   useEffect(() => {
     if (!open) return;
@@ -59,13 +68,19 @@ export function RussianDateField({
     setText(formatRu(day));
     setView(startOfMonth(day));
     setOpen(false);
+    onChange?.(formatIso(day));
   }
 
   function onText(next: string) {
     setText(next);
     const parsed = parseRu(next);
     setValue(parsed);
-    if (parsed) setView(startOfMonth(parsed));
+    if (parsed) {
+      setView(startOfMonth(parsed));
+      onChange?.(formatIso(parsed));
+    } else if (!next.trim()) {
+      onChange?.("");
+    }
   }
 
   const year = view.getFullYear();

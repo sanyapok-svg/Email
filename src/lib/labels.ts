@@ -19,3 +19,15 @@ export const STATUS_LABELS: Record<string, string> = {
 export function labelStatus(status: string): string {
   return STATUS_LABELS[status] || status;
 }
+
+export function statusCode(input: string | undefined): string | undefined {
+  return codeForLabel(STATUS_LABELS, input);
+}
+
+export function codeForLabel(labels: Record<string, string>, input: string | undefined): string | undefined {
+  const needle = input?.trim().toLowerCase();
+  if (!needle) return undefined;
+  if (Object.prototype.hasOwnProperty.call(labels, needle)) return needle;
+  const found = Object.entries(labels).find(([, label]) => label.toLowerCase() === needle);
+  return found ? found[0] : input?.trim();
+}
