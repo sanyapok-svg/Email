@@ -1,10 +1,13 @@
 import Link from "next/link";
+import { ConnectionCountdown } from "@/components/connection-countdown";
 import { MailboxCheck } from "@/components/mailbox-check";
 import { checkSettingsFrom } from "@/lib/mail/check-settings";
 import { MailboxControls } from "@/components/mailbox-controls";
 import { MailboxRules } from "@/components/mailbox-rules";
 import { Notice, PageTitle } from "@/components/shell";
 import { prisma } from "@/lib/db";
+import { formatCountdown, nextConnectionAt } from "@/lib/mail/next-connection";
+import { parseSchedule } from "@/lib/rules/parse";
 
 export default async function MailboxesPage({ searchParams }: { searchParams: Promise<{ notice?: string }> }) {
   const params = await searchParams;
@@ -40,6 +43,10 @@ export default async function MailboxesPage({ searchParams }: { searchParams: Pr
                   {mailbox.address}
                   {" · "}
                   писем {mailbox._count.messages}
+                  {" · "}
+                  {connectionStamp(mailbox.lastCheckedAt, mailbox.timezone)}
+                  {" · "}
+                  <NextConnection mailbox={mailbox} />
                   {mailbox.consecutiveErrors > 0 ? ` · ошибок подряд ${mailbox.consecutiveErrors}` : ""}
                 </p>
               </div>
@@ -69,4 +76,45 @@ export default async function MailboxesPage({ searchParams }: { searchParams: Pr
       </div>
     </>
   );
+}
+
+function NextConnection({
+  mailbox,
+}: {
+  mailbox: { lastCheckedAt: Date | null; pollIntervalSec: number; active: boolean; autoPoll: boolean; timezone: string; workDays: unknown; workIntervals: unknown; holidays: unknown };
+}) {
+  const now = Date.now();
+  if (!mailbox.active) return <span>ящик выключен</span>;
+  if (!mailbox.autoPoll) return <span>автопроверка выключена</span>;
+  const at = nextConnectionAt({
+    now: new Date(now),
+    lastCheckedAt: mailbox.lastCheckedAt,
+    pollIntervalSec: mailbox.pollIntervalSec,
+    active: mailbox.active,
+    autoPoll: mailbox.autoPoll,
+    schedule: parseSchedule(mailbox),
+  });
+  if (!at) return <span>окно проверки не найдено</span>;
+  return <ConnectionCountdown at={at.toISOString()} initial={formatCountdown(at.getTime() - now)} />;
+}
+
+function connectionStamp(date: Date | null, timeZone: string): string {
+  if (!date) return "соединения не было";
+  return `соединение ${new Intl.DateTimeFormat("ru-RU", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: safeZone(timeZone),
+  }).format(date)}`;
+}
+
+function safeZone(timeZone: string): string {
+  try {
+    Intl.DateTimeFormat("ru-RU", { timeZone }).format(new Date());
+    return timeZone;
+  } catch {
+    return "Europe/Moscow";
+  }
 }

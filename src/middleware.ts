@@ -4,7 +4,7 @@ import { verifySession } from "@/lib/auth/token";
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
-  if (pathname.startsWith("/api/cron") || pathname.startsWith("/api/health")) return NextResponse.next();
+  if (pathname.startsWith("/api/cron") || pathname.startsWith("/api/health") || pathname.startsWith("/.well-known/workflow")) return NextResponse.next();
   const secret = process.env.AUTH_SECRET || "";
   const token = request.cookies.get("en_session")?.value;
   const session = token && secret ? await verifySession(token, secret) : null;
@@ -24,5 +24,5 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|\\.well-known/workflow/).*)"],
 };

@@ -4,6 +4,7 @@ import { decryptSecret } from "@/lib/crypto/secrets";
 import { prisma } from "@/lib/db";
 import { ImapConnector, safeError } from "@/lib/imap/connector";
 import { logEvent } from "@/lib/log";
+import { isConnectionDue } from "@/lib/mail/next-connection";
 import { buildNormalizedMessage, buildSearchDocument } from "@/lib/mail/pipeline";
 import type { NormalizedMessage } from "@/lib/mail/model";
 import { bumpMetrics } from "@/lib/metrics/counters";
@@ -18,11 +19,31 @@ import { getIntegrationConfig } from "@/lib/settings";
 const REAL_NOTICE = ["pending", "scheduled", "sending", "sent"];
 
 export async function pollDueMailboxes() {
-  const mailboxes = await prisma.mailbox.findMany({ where: { active: true, autoPoll: true }, select: { id: true, pollIntervalSec: true, lastCheckedAt: true } });
-  const now = Date.now();
+  const mailboxes = await prisma.mailbox.findMany({
+    where: { active: true, autoPoll: true },
+    select: {
+      id: true,
+      active: true,
+      autoPoll: true,
+      pollIntervalSec: true,
+      lastCheckedAt: true,
+      timezone: true,
+      workDays: true,
+      workIntervals: true,
+      holidays: true,
+    },
+  });
+  const now = new Date();
   for (const mailbox of mailboxes) {
-    const interval = Math.max(60, mailbox.pollIntervalSec) * 1000;
-    if (mailbox.lastCheckedAt && now - mailbox.lastCheckedAt.getTime() < interval) continue;
+    const due = isConnectionDue({
+      now,
+      lastCheckedAt: mailbox.lastCheckedAt,
+      pollIntervalSec: mailbox.pollIntervalSec,
+      active: mailbox.active,
+      autoPoll: mailbox.autoPoll,
+      schedule: parseSchedule(mailbox),
+    });
+    if (!due) continue;
     await pollMailbox(mailbox.id);
   }
 }
@@ -31,11 +52,14 @@ export async function pollMailbox(mailboxId: string, options: { force?: boolean 
   return withLock(`poll:${mailboxId}`, 90_000, async () => {
     const mailbox = await prisma.mailbox.findUnique({ where: { id: mailboxId } });
     if (!mailbox || !mailbox.active) return;
-    if (!options.force && !mailbox.autoPoll) return;
-    if (!options.force && mailbox.lastCheckedAt) {
-      const interval = Math.max(60, mailbox.pollIntervalSec) * 1000;
-      if (Date.now() - mailbox.lastCheckedAt.getTime() < interval) return;
-    }
+    if (!options.force && !isConnectionDue({
+      now: new Date(),
+      lastCheckedAt: mailbox.lastCheckedAt,
+      pollIntervalSec: mailbox.pollIntervalSec,
+      active: mailbox.active,
+      autoPoll: mailbox.autoPoll,
+      schedule: parseSchedule(mailbox),
+    })) return;
     let deliver = false;
     const pollToken = randomUUID();
     const password = decryptSecret(mailbox.imapPasswordEnc);
