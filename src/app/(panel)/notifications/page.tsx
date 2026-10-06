@@ -31,6 +31,17 @@ export default async function NotificationsPage({ searchParams }: { searchParams
     });
     groups.set(item.mailboxId, group);
   }
+  const narrowed = Boolean(params.status || params.priority || params.category);
+  if (!narrowed) {
+    const boxes = await prisma.mailbox.findMany({
+      where: params.mailboxId ? { id: params.mailboxId } : undefined,
+      orderBy: { name: "asc" },
+      select: { id: true, name: true, address: true },
+    });
+    for (const mailbox of boxes) {
+      if (!groups.has(mailbox.id)) groups.set(mailbox.id, { id: mailbox.id, name: mailbox.name, address: mailbox.address, items: [] });
+    }
+  }
   const mailboxes = [...groups.values()].sort((left, right) => left.name.localeCompare(right.name, "ru"));
 
   return (

@@ -2,7 +2,12 @@ import { PageTitle } from "@/components/shell";
 import { prisma } from "@/lib/db";
 
 export default async function MetricsPage() {
-  const rows = await prisma.dailyMetric.findMany({ include: { mailbox: { select: { name: true } } }, orderBy: { day: "desc" }, take: 60 });
+  const [rows, mailboxes] = await Promise.all([
+    prisma.dailyMetric.findMany({ include: { mailbox: { select: { name: true } } }, orderBy: { day: "desc" }, take: 60 }),
+    prisma.mailbox.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true } }),
+  ]);
+  const seen = new Set(rows.map((row) => row.mailboxId));
+  const missing = mailboxes.filter((mailbox) => !seen.has(mailbox.id));
   return (
     <>
       <PageTitle title="Метрики" text="Счётчики по дням и ящикам: письма, уведомления и ошибки." />
@@ -29,6 +34,23 @@ export default async function MetricsPage() {
                 </tr>
               );
             })}
+            {missing.map((mailbox) => (
+              <tr key={mailbox.id}>
+                <td>—</td>
+                <td>{mailbox.name}</td>
+                <td>0</td>
+                <td>0</td>
+                <td>0</td>
+                <td>0</td>
+                <td>0</td>
+                <td>0</td>
+              </tr>
+            ))}
+            {rows.length === 0 && missing.length === 0 ? (
+              <tr>
+                <td colSpan={8}>Ящиков пока нет.</td>
+              </tr>
+            ) : null}
           </tbody>
         </table>
       </div>

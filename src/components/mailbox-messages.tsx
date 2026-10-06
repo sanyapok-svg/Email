@@ -68,7 +68,11 @@ export function MailboxMessages({
                 </tr>
               </thead>
               <tbody>
-                {items.map((message) => (
+                {items.length === 0 ? (
+                  <tr>
+                    <td colSpan={5}>Писем по этому ящику пока нет.</td>
+                  </tr>
+                ) : items.map((message) => (
                   <tr key={message.id}>
                     <td>{message.receivedAt}</td>
                     <td>

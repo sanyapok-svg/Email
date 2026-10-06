@@ -1,6 +1,7 @@
 import { randomUUID } from "crypto";
 import { prisma } from "@/lib/db";
 import { logEvent } from "@/lib/log";
+import { pollDueMailboxes } from "@/lib/orchestration/poll";
 import { mailboxPollWorkflow } from "@/lib/orchestration/poll-workflow";
 import { POLL_CHAIN_LOCK } from "@/lib/orchestration/poll-wait";
 
@@ -8,6 +9,7 @@ const INITIAL_LOCK_MS = 15 * 60 * 1000;
 
 export async function ensurePollChain(): Promise<"started" | "running" | "skipped"> {
   if (!process.env.VERCEL || process.env.NEXT_PHASE === "phase-production-build") return "skipped";
+  await pollOverdueMailboxes();
   const now = new Date();
   const existing = await prisma.schedulerLock.findUnique({ where: { id: POLL_CHAIN_LOCK } });
   if (existing && existing.lockedUntil.getTime() > now.getTime()) return "running";
@@ -32,5 +34,14 @@ export async function ensurePollChain(): Promise<"started" | "running" | "skippe
     const message = error instanceof Error ? error.message : "chain start failed";
     logEvent("error", "poll.chain_start_failed", { message: message.slice(0, 200) });
     throw error;
+  }
+}
+
+async function pollOverdueMailboxes(): Promise<void> {
+  try {
+    await pollDueMailboxes();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "poll failed";
+    logEvent("error", "poll.overdue_failed", { message: message.slice(0, 200) });
   }
 }

@@ -9,7 +9,7 @@ import { searchMessages } from "@/lib/search/messages";
 export default async function MessagesPage({ searchParams }: { searchParams: Promise<Record<string, string | undefined>> }) {
   const params = await searchParams;
   const [mailboxes, messages] = await Promise.all([
-    prisma.mailbox.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true } }),
+    prisma.mailbox.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true, address: true } }),
     searchMessages({
       q: params.q,
       mailboxId: params.mailboxId,
@@ -32,7 +32,7 @@ export default async function MessagesPage({ searchParams }: { searchParams: Pro
       <PageTitle title="Письма" text="Письма собраны под своим ящиком, список можно свернуть. Поиск идёт по уже сохранённому тексту и не запускает новую обработку." />
       <Notice text={params.notice} />
       <MessageSearch key={searchKey(params)} mailboxes={mailboxes} values={params} />
-      <MessageGroups messages={messages} />
+      <MessageGroups messages={messages} mailboxes={textSearch(params) ? [] : mailboxes.filter((mailbox) => !params.mailboxId || mailbox.id === params.mailboxId)} />
     </>
   );
 }
@@ -43,7 +43,17 @@ function searchKey(params: Record<string, string | undefined>): string {
     .join("\0");
 }
 
-function MessageGroups({ messages }: { messages: Awaited<ReturnType<typeof searchMessages>> }) {
+function textSearch(params: Record<string, string | undefined>): boolean {
+  return ["q", "from", "domain", "phone", "email", "contract", "invoice", "decision", "sentiment", "urgency", "language", "fromDate", "toDate"].some((key) => params[key]);
+}
+
+function MessageGroups({
+  messages,
+  mailboxes,
+}: {
+  messages: Awaited<ReturnType<typeof searchMessages>>;
+  mailboxes: Array<{ id: string; name: string; address: string }>;
+}) {
   const groups = new Map<string, { id: string; name: string; address: string; items: MessageRow[] }>();
   for (const message of messages) {
     const group = groups.get(message.mailboxId) ?? {
@@ -64,13 +74,16 @@ function MessageGroups({ messages }: { messages: Awaited<ReturnType<typeof searc
     });
     groups.set(message.mailboxId, group);
   }
-  const mailboxes = [...groups.values()].sort((left, right) => left.name.localeCompare(right.name, "ru"));
-  if (mailboxes.length === 0) {
+  for (const mailbox of mailboxes) {
+    if (!groups.has(mailbox.id)) groups.set(mailbox.id, { id: mailbox.id, name: mailbox.name, address: mailbox.address, items: [] });
+  }
+  const ordered = [...groups.values()].sort((left, right) => left.name.localeCompare(right.name, "ru"));
+  if (ordered.length === 0) {
     return <p className="rounded-xl border border-dashed border-line bg-card px-4 py-6 text-sm">Писем пока нет.</p>;
   }
   return (
     <div className="grid gap-5">
-      {mailboxes.map((mailbox) => (
+      {ordered.map((mailbox) => (
         <section key={mailbox.id} id={`mailbox-${mailbox.id}`} className="overflow-hidden rounded-xl border border-line bg-card">
           <header className="px-4 py-4 sm:px-5">
             <Link className="text-lg font-semibold underline" href={`/mailboxes/${mailbox.id}`}>

@@ -66,7 +66,11 @@ export function MailboxNotifications({
                 </tr>
               </thead>
               <tbody>
-                {items.map((item) => (
+                {items.length === 0 ? (
+                  <tr>
+                    <td colSpan={5}>Уведомлений по этому ящику пока нет.</td>
+                  </tr>
+                ) : items.map((item) => (
                   <tr key={item.id}>
                     <td>
                       <Link className="underline" href={`/notifications/${item.id}`}>
