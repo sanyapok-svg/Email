@@ -133,6 +133,18 @@ export async function pollMailboxNow(formData: FormData) {
   redirect(noticeTo(returnTo, "Проверка выполнена"));
 }
 
+export async function deleteMailbox(formData: FormData) {
+  await requireUser();
+  const id = String(formData.get("id") || "");
+  const mailbox = id ? await prisma.mailbox.findUnique({ where: { id }, select: { id: true } }) : null;
+  if (!mailbox) redirect(withNotice("/mailboxes", "Ящик не найден"));
+  await prisma.$transaction([
+    prisma.schedulerLock.deleteMany({ where: { id: `poll:${id}` } }),
+    prisma.mailbox.delete({ where: { id } }),
+  ]);
+  redirect(withNotice("/mailboxes", "Ящик удалён"));
+}
+
 export async function installStarterRules(formData: FormData) {
   await requireUser();
   const mailboxId = String(formData.get("id") || "");

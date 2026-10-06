@@ -3,9 +3,11 @@ import { ConnectionCountdown } from "@/components/connection-countdown";
 import { MailboxCheck } from "@/components/mailbox-check";
 import { checkSettingsFrom } from "@/lib/mail/check-settings";
 import { MailboxControls } from "@/components/mailbox-controls";
+import { ConfirmDelete } from "@/components/confirm-delete";
 import { MailboxRules } from "@/components/mailbox-rules";
 import { Notice, PageTitle } from "@/components/shell";
 import { prisma } from "@/lib/db";
+import { deleteMailbox } from "@/server/mailboxes";
 import { formatCountdown, nextConnectionAt } from "@/lib/mail/next-connection";
 import { parseSchedule } from "@/lib/rules/parse";
 
@@ -50,7 +52,16 @@ export default async function MailboxesPage({ searchParams }: { searchParams: Pr
                   {mailbox.consecutiveErrors > 0 ? ` · ошибок подряд ${mailbox.consecutiveErrors}` : ""}
                 </p>
               </div>
-              <MailboxControls id={mailbox.id} active={mailbox.active} returnTo={`/mailboxes#mailbox-${mailbox.id}`} />
+              <div className="flex flex-wrap items-center gap-2">
+                <MailboxControls id={mailbox.id} active={mailbox.active} returnTo={`/mailboxes#mailbox-${mailbox.id}`} />
+                <ConfirmDelete
+                  action={deleteMailbox}
+                  id={mailbox.id}
+                  label="Удалить ящик"
+                  title="Удалить ящик"
+                  text={`Ящик «${mailbox.name}», его правила, письма, уведомления и метрики будут удалены.`}
+                />
+              </div>
             </header>
             <MailboxCheck
               mailboxId={mailbox.id}

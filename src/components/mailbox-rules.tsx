@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { moveRule } from "@/server/rules";
+import { moveRule, deleteRule } from "@/server/rules";
+import { ConfirmDelete } from "@/components/confirm-delete";
 
 export type MailboxRuleRow = {
   id: string;
@@ -120,6 +121,13 @@ export function MailboxRules({
                                 Ниже
                               </button>
                             </form>
+                            <ConfirmDelete
+                              action={deleteRule}
+                              id={rule.id}
+                              label="Удалить"
+                              title="Удалить правило"
+                              text={`Правило «${rule.name}» будет удалено. Письма и уведомления останутся, но уже без этого правила.`}
+                            />
                           </div>
                         </td>
                       </tr>

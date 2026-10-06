@@ -5,7 +5,8 @@ import { useState } from "react";
 import { B24NoticePreview, type NoticeRecipient } from "@/components/b24-notice-preview";
 import { DEFAULT_NOTICE_FIELDS, NOTICE_FIELDS } from "@/lib/b24/notice";
 import { OPERATORS, RULE_FIELDS } from "@/lib/rules/fields";
-import { saveRule } from "@/server/rules";
+import { saveRule, deleteRule } from "@/server/rules";
+import { ConfirmDelete } from "@/components/confirm-delete";
 
 type ConditionRow = { field: string; operator: string; value: string };
 
@@ -252,6 +253,15 @@ export function RuleForm({
         </div>
         <button type="submit">Сохранить правило</button>
       </form>
+      {initial ? (
+        <ConfirmDelete
+          action={deleteRule}
+          id={initial.id}
+          label="Удалить правило"
+          title="Удалить правило"
+          text={`Правило «${initial.name || "без названия"}» будет удалено. Письма и уведомления останутся, но уже без этого правила.`}
+        />
+      ) : null}
     </div>
   );
 

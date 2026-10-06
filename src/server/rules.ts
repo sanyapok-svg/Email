@@ -41,6 +41,15 @@ export async function saveRule(formData: FormData) {
   redirect(withNotice(`/rules/${saved.id}`, "Сохранено"));
 }
 
+export async function deleteRule(formData: FormData) {
+  await requireUser();
+  const id = String(formData.get("id") || "");
+  const rule = id ? await prisma.rule.findUnique({ where: { id }, select: { mailboxId: true } }) : null;
+  if (!rule) redirect(withNotice("/mailboxes", "Правило не найдено"));
+  await prisma.rule.delete({ where: { id } });
+  redirect(`${withNotice("/mailboxes", "Правило удалено")}#mailbox-${rule.mailboxId}`);
+}
+
 export async function moveRule(formData: FormData) {
   await requireUser();
   const id = String(formData.get("id") || "");
