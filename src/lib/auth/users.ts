@@ -9,16 +9,18 @@ export async function ensureBootstrapUser() {
   if (!login || !password) return;
   try {
     await prisma.serviceUser.create({
-      data: { login, name: "Администратор", passwordHash: hashPassword(password), active: true },
+      data: { login, name: "Администратор", passwordHash: hashPassword(password), active: true, isSuperAdmin: true },
     });
   } catch {
     // A parallel request may have created the first user.
   }
 }
 
-export async function listServiceUsers() {
-  return prisma.serviceUser.findMany({
-    orderBy: { login: "asc" },
-    select: { id: true, login: true, name: true, active: true },
+export async function listServiceUsers(accountId: string) {
+  const members = await prisma.accountMember.findMany({
+    where: { accountId },
+    orderBy: { user: { login: "asc" } },
+    select: { user: { select: { id: true, login: true, name: true, active: true, isSuperAdmin: true } } },
   });
+  return members.map((member) => member.user);
 }

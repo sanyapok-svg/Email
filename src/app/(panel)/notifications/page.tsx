@@ -1,14 +1,17 @@
 import Link from "next/link";
 import { MailboxNotifications, type NoticeRow } from "@/components/mailbox-notifications";
 import { Notice, PageTitle } from "@/components/shell";
+import { requireAccount } from "@/lib/auth/account";
 import { prisma } from "@/lib/db";
 import { priorityCode, priorityLabel } from "@/lib/b24/notice";
 import { labelStatus, statusCode } from "@/lib/labels";
 
 export default async function NotificationsPage({ searchParams }: { searchParams: Promise<Record<string, string | undefined>> }) {
   const params = await searchParams;
+  const { accountId } = await requireAccount();
   const items = await prisma.notification.findMany({
     where: {
+      mailbox: { accountId },
       status: statusCode(params.status),
       mailboxId: params.mailboxId || undefined,
       priority: priorityCode(params.priority),
@@ -34,7 +37,7 @@ export default async function NotificationsPage({ searchParams }: { searchParams
   const narrowed = Boolean(params.status || params.priority || params.category);
   if (!narrowed) {
     const boxes = await prisma.mailbox.findMany({
-      where: params.mailboxId ? { id: params.mailboxId } : undefined,
+      where: { accountId, ...(params.mailboxId ? { id: params.mailboxId } : {}) },
       orderBy: { name: "asc" },
       select: { id: true, name: true, address: true },
     });

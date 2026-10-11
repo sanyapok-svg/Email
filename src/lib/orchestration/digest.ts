@@ -65,6 +65,7 @@ export function combineDigest(pieces: DigestPiece[], scope: { mailboxId: string;
       priority,
       category,
       recipients: first?.payload.recipients ?? [],
+      notifyChannels: first?.payload.notifyChannels ?? ["bitrix"],
       responseDueAt: responseDueAt?.toISOString() ?? null,
       noticeFields: fields,
       messages: letters.map((letter, index) => ({

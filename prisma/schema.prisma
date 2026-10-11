@@ -8,8 +8,40 @@ datasource db {
   directUrl = env("DATABASE_URL_UNPOOLED")
 }
 
+model Account {
+  id        String   @id @default(cuid())
+  name      String
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  members       AccountMember[]
+  mailboxes     Mailbox[]
+  b24Recipients B24Recipient[]
+  integration   IntegrationConfig?
+
+  @@map("accounts")
+}
+
+model AccountMember {
+  id        String   @id @default(cuid())
+  accountId String   @map("account_id")
+  userId    String   @map("user_id")
+  role      String   @default("admin")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  account Account     @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  user    ServiceUser @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([accountId, userId])
+  @@index([userId])
+  @@map("account_members")
+}
+
 model Mailbox {
   id                    String    @id @default(cuid())
+  accountId             String    @map("account_id")
+  provider              String    @default("yandex")
   name                  String
   address               String
   displayAddress        String?   @map("display_address")
@@ -58,6 +90,7 @@ model Mailbox {
   createdAt             DateTime  @default(now()) @map("created_at")
   updatedAt             DateTime  @updatedAt @map("updated_at")
 
+  account        Account            @relation(fields: [accountId], references: [id], onDelete: Cascade)
   rules          Rule[]
   messages       ProcessedMessage[]
   notifications  Notification[]
@@ -65,6 +98,7 @@ model Mailbox {
   templates      ReplyTemplate[]
   metrics        DailyMetric[]
 
+  @@index([accountId])
   @@map("mailboxes")
 }
 
@@ -256,37 +290,50 @@ model ServiceUser {
   name         String
   passwordHash String   @map("password_hash")
   active       Boolean  @default(true)
+  isSuperAdmin Boolean  @default(false) @map("is_super_admin")
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
+
+  memberships AccountMember[]
 
   @@map("service_users")
 }
 
 model B24Recipient {
   id         String   @id @default(cuid())
-  number     Int      @unique @default(autoincrement())
+  accountId  String   @map("account_id")
+  number     Int
   login      String   @default("")
   name       String
-  externalId String   @map("external_id")
+  externalId     String   @map("external_id")
+  telegramChatId String   @default("") @map("telegram_chat_id")
   active     Boolean  @default(true)
   dismissed  Boolean  @default(false)
   absences   Json     @default("[]")
   createdAt  DateTime @default(now()) @map("created_at")
   updatedAt  DateTime @updatedAt @map("updated_at")
 
+  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@unique([accountId, number])
+  @@index([accountId])
   @@map("b24_recipients")
 }
 
 model IntegrationConfig {
-  id                 String   @id @default("default")
-  b24Mode            String   @default("mock") @map("b24_mode")
-  webhookUrlEnc      String?  @map("webhook_url_enc")
-  globalDryRun       Boolean  @default(true) @map("global_dry_run")
-  notifyMaxAttempts  Int      @default(5) @map("notify_max_attempts")
-  replyMaxAttempts   Int      @default(5) @map("reply_max_attempts")
-  includeBodyPreview Boolean  @default(false) @map("include_body_preview")
-  globalMessageDedupe Boolean @default(false) @map("global_message_dedupe")
-  updatedAt          DateTime @updatedAt @map("updated_at")
+  id                  String   @id @default(cuid())
+  accountId           String   @unique @map("account_id")
+  b24Mode             String   @default("mock") @map("b24_mode")
+  webhookUrlEnc       String?  @map("webhook_url_enc")
+  telegramBotTokenEnc String?  @map("telegram_bot_token_enc")
+  globalDryRun        Boolean  @default(true) @map("global_dry_run")
+  notifyMaxAttempts   Int      @default(5) @map("notify_max_attempts")
+  replyMaxAttempts    Int      @default(5) @map("reply_max_attempts")
+  includeBodyPreview  Boolean  @default(false) @map("include_body_preview")
+  globalMessageDedupe Boolean  @default(false) @map("global_message_dedupe")
+  updatedAt           DateTime @updatedAt @map("updated_at")
+
+  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
 
   @@map("integration_config")
 }

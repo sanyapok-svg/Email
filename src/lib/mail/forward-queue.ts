@@ -39,10 +39,17 @@ export async function queueMissingForwards(): Promise<void> {
   if (!rules.length) return;
   const targets = await resolveForwardTargets(rules.map((item) => item.rule));
   const mailboxByRule = new Map(rules.map((item) => [item.rule.id, item.mailboxId]));
-  const config = await getIntegrationConfig();
+  const configs = new Map<string, Awaited<ReturnType<typeof getIntegrationConfig>>>();
   for (const target of targets) {
     const mailboxId = mailboxByRule.get(target.rule.id);
     if (!mailboxId) continue;
+    const mailbox = await prisma.mailbox.findUnique({ where: { id: mailboxId }, select: { accountId: true } });
+    if (!mailbox) continue;
+    let config = configs.get(mailbox.accountId);
+    if (!config) {
+      config = await getIntegrationConfig(mailbox.accountId);
+      configs.set(mailbox.accountId, config);
+    }
     const messages = await prisma.processedMessage.findMany({
       where: {
         mailboxId,

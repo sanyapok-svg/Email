@@ -121,6 +121,7 @@ function buildNotification(message: NormalizedMessage, rule: RuleRecord, ctx: De
       responseDueAt: due.dueAt?.toISOString() ?? null,
       category: rule.category,
       recipients: rule.action.recipientIds,
+      notifyChannels: rule.action.notifyChannels,
       receivedAt: message.receivedAt.toISOString(),
       attachments: message.attachmentNames,
       deadline: message.earliestDeadline,

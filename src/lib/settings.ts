@@ -1,9 +1,9 @@
 import { prisma } from "@/lib/db";
 
-export async function getIntegrationConfig() {
+export async function getIntegrationConfig(accountId: string) {
   return prisma.integrationConfig.upsert({
-    where: { id: "default" },
-    create: { id: "default" },
+    where: { accountId },
+    create: { accountId },
     update: {},
   });
 }

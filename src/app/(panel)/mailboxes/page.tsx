@@ -6,6 +6,7 @@ import { MailboxControls } from "@/components/mailbox-controls";
 import { ConfirmDelete } from "@/components/confirm-delete";
 import { MailboxRules } from "@/components/mailbox-rules";
 import { Notice, PageTitle } from "@/components/shell";
+import { requireAccount } from "@/lib/auth/account";
 import { prisma } from "@/lib/db";
 import { deleteMailbox } from "@/server/mailboxes";
 import { formatCountdown, nextConnectionAt } from "@/lib/mail/next-connection";
@@ -13,7 +14,9 @@ import { normalizeAction, parseSchedule } from "@/lib/rules/parse";
 
 export default async function MailboxesPage({ searchParams }: { searchParams: Promise<{ notice?: string }> }) {
   const params = await searchParams;
+  const { accountId } = await requireAccount();
   const mailboxes = await prisma.mailbox.findMany({
+    where: { accountId },
     orderBy: { name: "asc" },
     include: {
       _count: { select: { messages: true } },

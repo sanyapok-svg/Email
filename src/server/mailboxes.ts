@@ -1,29 +1,45 @@
 "use server";
 
 import { redirect } from "next/navigation";
-import { requireUser } from "@/lib/auth/session";
+import { requireAccount } from "@/lib/auth/account";
 import { encryptSecret } from "@/lib/crypto/secrets";
 import { prisma } from "@/lib/db";
 import { testImapConnection, safeError } from "@/lib/imap/connector";
 import { pollMailbox } from "@/lib/orchestration/poll";
 import { withNotice } from "@/lib/http/notice";
 import { POLL_INTERVALS, pollIntervalMinutes } from "@/lib/mail/check-settings";
+import { resolveMailboxConnection } from "@/lib/mail/providers";
 
 export async function saveMailbox(formData: FormData) {
-  await requireUser();
+  const ctx = await requireAccount();
   const id = String(formData.get("id") || "");
-  const existing = id ? await prisma.mailbox.findUnique({ where: { id } }) : null;
+  const existing = id ? await prisma.mailbox.findFirst({ where: { id, accountId: ctx.accountId } }) : null;
+  if (id && !existing) redirect(withNotice("/mailboxes", "Ящик не найден"));
   const imapPassword = String(formData.get("imapPassword") || "");
   if (!existing && !imapPassword) redirect(withNotice("/mailboxes/new", "Нужен пароль IMAP"));
+  const connection = resolveMailboxConnection({
+    provider: String(formData.get("provider") || existing?.provider || "yandex"),
+    imapHost: optional(formData, "imapHost"),
+    imapPort: number(formData, "imapPort", 993),
+    imapSecure: formData.get("imapSecure") === "on",
+    smtpHost: optional(formData, "smtpHost"),
+    smtpPort: number(formData, "smtpPort", 465),
+    smtpSecure: formData.get("smtpSecure") === "on",
+  });
+  if (!connection.imapHost) redirect(withNotice(id ? `/mailboxes/${id}` : "/mailboxes/new", "Укажите IMAP-сервер"));
   const data = {
     name: required(formData, "name"),
     address: required(formData, "address").toLowerCase(),
     displayAddress: optional(formData, "displayAddress"),
     active: formData.get("active") === "on",
     timezone: optional(formData, "timezone") || "Europe/Moscow",
-    imapHost: optional(formData, "imapHost") || "imap.yandex.com",
-    imapPort: number(formData, "imapPort", 993),
-    imapSecure: formData.get("imapSecure") === "on",
+    provider: connection.provider,
+    imapHost: connection.imapHost,
+    imapPort: connection.imapPort,
+    imapSecure: connection.imapSecure,
+    smtpHost: connection.smtpHost || existing?.smtpHost || "",
+    smtpPort: connection.smtpHost ? connection.smtpPort : existing?.smtpPort || connection.smtpPort,
+    smtpSecure: connection.smtpHost ? connection.smtpSecure : existing?.smtpSecure ?? connection.smtpSecure,
     imapUser: required(formData, "imapUser"),
     imapPasswordEnc: imapPassword ? encryptSecret(imapPassword) : existing?.imapPasswordEnc || "",
     repliesEnabled: false,
@@ -42,6 +58,7 @@ export async function saveMailbox(formData: FormData) {
     : await prisma.mailbox.create({
         data: {
           ...data,
+          accountId: ctx.accountId,
           pollIntervalSec: 300,
           workDays: [1, 2, 3, 4, 5],
           workIntervals: [{ start: "09:00", end: "18:00" }],
@@ -57,9 +74,9 @@ export async function saveMailbox(formData: FormData) {
 }
 
 export async function saveMailboxCheck(formData: FormData) {
-  await requireUser();
+  const ctx = await requireAccount();
   const id = String(formData.get("id") || "");
-  const mailbox = await prisma.mailbox.findUnique({ where: { id }, select: { id: true } });
+  const mailbox = await prisma.mailbox.findFirst({ where: { id, accountId: ctx.accountId }, select: { id: true } });
   const returnTo = safeReturn(String(formData.get("returnTo") || ""), mailbox ? `/mailboxes#check-${id}` : "/mailboxes");
   if (!mailbox) redirect(withNotice("/mailboxes", "Ящик не найден"));
   const workDays = csvNumbers(String(formData.get("workDays") || "1,2,3,4,5"));
@@ -77,10 +94,10 @@ export async function saveMailboxCheck(formData: FormData) {
 }
 
 export async function setMailboxAutoPoll(formData: FormData) {
-  await requireUser();
+  const ctx = await requireAccount();
   const id = String(formData.get("id") || "");
   const enabled = formData.get("enabled") === "1";
-  const mailbox = await prisma.mailbox.findUnique({ where: { id }, select: { id: true } });
+  const mailbox = await prisma.mailbox.findFirst({ where: { id, accountId: ctx.accountId }, select: { id: true } });
   const returnTo = safeReturn(String(formData.get("returnTo") || ""), mailbox ? `/mailboxes#mailbox-${id}` : "/mailboxes");
   if (!mailbox) redirect(withNotice("/mailboxes", "Ящик не найден"));
   await prisma.mailbox.update({ where: { id }, data: { autoPoll: enabled } });
@@ -88,10 +105,10 @@ export async function setMailboxAutoPoll(formData: FormData) {
 }
 
 export async function setMailboxEnabled(formData: FormData) {
-  await requireUser();
+  const ctx = await requireAccount();
   const id = String(formData.get("id") || "");
   const enabled = formData.get("enabled") === "1";
-  const mailbox = await prisma.mailbox.findUnique({ where: { id }, select: { id: true } });
+  const mailbox = await prisma.mailbox.findFirst({ where: { id, accountId: ctx.accountId }, select: { id: true } });
   const returnTo = safeReturn(String(formData.get("returnTo") || ""), mailbox ? `/mailboxes#mailbox-${id}` : "/mailboxes");
   if (!mailbox) redirect(withNotice("/mailboxes", "Ящик не найден"));
   await prisma.$transaction([
@@ -102,9 +119,9 @@ export async function setMailboxEnabled(formData: FormData) {
 }
 
 export async function testMailboxImap(formData: FormData) {
-  await requireUser();
+  const ctx = await requireAccount();
   const id = String(formData.get("id") || "");
-  const mailbox = await prisma.mailbox.findUnique({ where: { id } });
+  const mailbox = await prisma.mailbox.findFirst({ where: { id, accountId: ctx.accountId } });
   if (!mailbox) redirect(withNotice("/mailboxes", "Ящик не найден"));
   try {
     const { decryptSecret } = await import("@/lib/crypto/secrets");
@@ -123,10 +140,10 @@ export async function testMailboxImap(formData: FormData) {
 }
 
 export async function pollMailboxNow(formData: FormData) {
-  await requireUser();
+  const ctx = await requireAccount();
   const id = String(formData.get("id") || "");
   const returnTo = safeReturn(String(formData.get("returnTo") || ""), `/mailboxes#mailbox-${id}`);
-  const mailbox = await prisma.mailbox.findUnique({ where: { id }, select: { active: true } });
+  const mailbox = await prisma.mailbox.findFirst({ where: { id, accountId: ctx.accountId }, select: { active: true } });
   if (!mailbox) redirect(withNotice("/mailboxes", "Ящик не найден"));
   if (!mailbox.active) redirect(noticeTo(returnTo, "Ящик выключен, почта не проверялась"));
   await pollMailbox(id, { force: true });
@@ -134,9 +151,9 @@ export async function pollMailboxNow(formData: FormData) {
 }
 
 export async function deleteMailbox(formData: FormData) {
-  await requireUser();
+  const ctx = await requireAccount();
   const id = String(formData.get("id") || "");
-  const mailbox = id ? await prisma.mailbox.findUnique({ where: { id }, select: { id: true } }) : null;
+  const mailbox = id ? await prisma.mailbox.findFirst({ where: { id, accountId: ctx.accountId }, select: { id: true } }) : null;
   if (!mailbox) redirect(withNotice("/mailboxes", "Ящик не найден"));
   await prisma.$transaction([
     prisma.schedulerLock.deleteMany({ where: { id: `poll:${id}` } }),

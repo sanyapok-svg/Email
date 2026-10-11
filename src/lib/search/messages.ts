@@ -19,10 +19,10 @@ export type MessageSearchInput = {
   toDate?: string;
 };
 
-export async function searchMessages(input: MessageSearchInput) {
-  const where = buildWhere(input);
+export async function searchMessages(input: MessageSearchInput, accountId: string) {
+  const where = buildWhere(input, accountId);
   if (input.q?.trim()) {
-    const ids = await fullTextIds(input.q.trim());
+    const ids = await fullTextIds(input.q.trim(), accountId);
     where.id = { in: ids.length ? ids : ["__none__"] };
   }
   return prisma.processedMessage.findMany({
@@ -37,8 +37,8 @@ export async function searchMessages(input: MessageSearchInput) {
   });
 }
 
-function buildWhere(input: MessageSearchInput): Prisma.ProcessedMessageWhereInput {
-  const where: Prisma.ProcessedMessageWhereInput = {};
+function buildWhere(input: MessageSearchInput, accountId: string): Prisma.ProcessedMessageWhereInput {
+  const where: Prisma.ProcessedMessageWhereInput = { mailbox: { accountId } };
   if (input.mailboxId) where.mailboxId = input.mailboxId;
   if (input.from) where.fromEmail = { contains: input.from, mode: "insensitive" };
   if (input.domain) where.fromDomain = { contains: input.domain, mode: "insensitive" };
@@ -59,24 +59,29 @@ function buildWhere(input: MessageSearchInput): Prisma.ProcessedMessageWhereInpu
   return where;
 }
 
-async function fullTextIds(query: string): Promise<string[]> {
+async function fullTextIds(query: string, accountId: string): Promise<string[]> {
   const like = `%${query.replace(/[%_\\]/g, "\\$&")}%`;
   try {
     const rows = await prisma.$queryRaw<{ id: string }[]>`
-      SELECT id
-      FROM processed_messages
-      WHERE to_tsvector('russian', coalesce(search_document, '')) @@ plainto_tsquery('russian', ${query})
-         OR to_tsvector('english', coalesce(search_document, '')) @@ plainto_tsquery('english', ${query})
-         OR search_document ILIKE ${like} ESCAPE '\\'
-         OR subject ILIKE ${like} ESCAPE '\\'
-         OR from_email ILIKE ${like} ESCAPE '\\'
-      ORDER BY received_at DESC
+      SELECT m.id
+      FROM processed_messages m
+      INNER JOIN mailboxes b ON b.id = m.mailbox_id
+      WHERE b.account_id = ${accountId}
+        AND (
+          to_tsvector('russian', coalesce(m.search_document, '')) @@ plainto_tsquery('russian', ${query})
+          OR to_tsvector('english', coalesce(m.search_document, '')) @@ plainto_tsquery('english', ${query})
+          OR m.search_document ILIKE ${like} ESCAPE '\\'
+          OR m.subject ILIKE ${like} ESCAPE '\\'
+          OR m.from_email ILIKE ${like} ESCAPE '\\'
+        )
+      ORDER BY m.received_at DESC
       LIMIT 50
     `;
     return rows.map((row) => row.id);
   } catch {
     const rows = await prisma.processedMessage.findMany({
       where: {
+        mailbox: { accountId },
         OR: [
           { searchDocument: { contains: query, mode: "insensitive" } },
           { subject: { contains: query, mode: "insensitive" } },

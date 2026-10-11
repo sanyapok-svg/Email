@@ -1,6 +1,7 @@
 import type { Prisma } from "@prisma/client";
 import { calendarDay, coveringSubstituteIds, readAbsences, resolveRecipients, type RecipientPerson } from "@/lib/b24/absences";
 import { deliverToBitrix } from "@/lib/b24/adapter";
+import { deliverToTelegram } from "@/lib/telegram/bot";
 import { decryptSecret } from "@/lib/crypto/secrets";
 import { prisma } from "@/lib/db";
 import { isEmail } from "@/lib/mail/forward";
@@ -23,8 +24,7 @@ export async function dispatchQueues() {
 async function dispatchNotifications() {
   await flushIdleDigests();
   const now = new Date();
-  const config = await getIntegrationConfig();
-  const webhook = resolveWebhook(config.webhookUrlEnc);
+  const configs = new Map<string, Awaited<ReturnType<typeof getIntegrationConfig>>>();
   const items = await prisma.notification.findMany({
     where: readyWhere(now),
     orderBy: { createdAt: "asc" },
@@ -34,12 +34,13 @@ async function dispatchNotifications() {
   for (const item of items) {
     const claimed = await prisma.notification.updateMany({ where: { id: item.id, status: item.status }, data: { status: "sending" } });
     if (claimed.count !== 1) continue;
-    const payload = await withBitrixUsers(item.payload as Prisma.JsonObject, now, item.mailbox.timezone);
-    const result = await deliverToBitrix({
-      mode: config.b24Mode === "webhook" ? "webhook" : "mock",
-      webhookUrl: webhook,
-      payload,
-    });
+    let config = configs.get(item.mailbox.accountId);
+    if (!config) {
+      config = await getIntegrationConfig(item.mailbox.accountId);
+      configs.set(item.mailbox.accountId, config);
+    }
+    const payload = await withBitrixUsers(item.payload as Prisma.JsonObject, now, item.mailbox.timezone, item.mailbox.accountId);
+    const result = await deliverNotification(payload, config);
     if (result.ok) {
       await prisma.notification.update({
         where: { id: item.id },
@@ -162,6 +163,32 @@ async function dispatchForwards() {
   }
 }
 
+async function deliverNotification(
+  payload: Prisma.JsonObject,
+  config: { b24Mode: string; webhookUrlEnc: string | null; telegramBotTokenEnc: string | null },
+): Promise<{ ok: true; mocked: boolean } | { ok: false; error: string }> {
+  const channel = Array.isArray(payload.notifyChannels) && payload.notifyChannels.map(String).includes("telegram") ? "telegram" : "bitrix";
+  if (channel === "telegram") {
+    const users = Array.isArray(payload.b24Users) ? payload.b24Users : [];
+    const chatIds = users.flatMap((user) => {
+      if (!user || typeof user !== "object") return [];
+      const id = String((user as { telegramChatId?: unknown }).telegramChatId ?? "").trim();
+      return id ? [id] : [];
+    });
+    const sent = await deliverToTelegram({
+      token: config.telegramBotTokenEnc ? decryptSecret(config.telegramBotTokenEnc) : null,
+      chatIds,
+      text: String(payload.text || payload.subject || ""),
+    });
+    return sent.ok ? { ok: true, mocked: false } : sent;
+  }
+  return deliverToBitrix({
+    mode: config.b24Mode === "webhook" ? "webhook" : "mock",
+    webhookUrl: resolveWebhook(config.webhookUrlEnc),
+    payload,
+  });
+}
+
 function readyWhere(now: Date) {
   return {
     status: { in: ["pending", "scheduled"] },
@@ -172,12 +199,12 @@ function readyWhere(now: Date) {
   };
 }
 
-async function withBitrixUsers(payload: Prisma.JsonObject, now: Date, timeZone: string): Promise<Prisma.JsonObject> {
+async function withBitrixUsers(payload: Prisma.JsonObject, now: Date, timeZone: string, accountId: string): Promise<Prisma.JsonObject> {
   const ids = Array.isArray(payload.recipients) ? payload.recipients.map(String) : [];
   if (!ids.length) return payload;
   const selectedRows = await prisma.b24Recipient.findMany({
-    where: { id: { in: ids } },
-    select: { id: true, name: true, login: true, externalId: true, active: true, absences: true },
+    where: { id: { in: ids }, accountId },
+    select: { id: true, name: true, login: true, externalId: true, telegramChatId: true, active: true, absences: true },
   });
   const selectedById = new Map(selectedRows.map((row) => [row.id, toPerson(row)]));
   const selected = ids.flatMap((id) => {
@@ -188,8 +215,8 @@ async function withBitrixUsers(payload: Prisma.JsonObject, now: Date, timeZone: 
   const extraIds = coveringSubstituteIds(selected, day).filter((id) => !selectedById.has(id));
   const extraRows = extraIds.length
     ? await prisma.b24Recipient.findMany({
-        where: { id: { in: extraIds } },
-        select: { id: true, name: true, login: true, externalId: true, active: true, absences: true },
+        where: { id: { in: extraIds }, accountId },
+        select: { id: true, name: true, login: true, externalId: true, telegramChatId: true, active: true, absences: true },
       })
     : [];
   const directory = new Map<string, RecipientPerson>([...selected, ...extraRows.map(toPerson)].map((person) => [person.id, person]));
@@ -199,16 +226,18 @@ async function withBitrixUsers(payload: Prisma.JsonObject, now: Date, timeZone: 
       name: person.name,
       login: person.login,
       externalId: person.externalId,
+      telegramChatId: person.telegramChatId || "",
     })),
   };
 }
 
-function toPerson(row: { id: string; name: string; login: string; externalId: string; active: boolean; absences: Prisma.JsonValue }): RecipientPerson {
+function toPerson(row: { id: string; name: string; login: string; externalId: string; telegramChatId?: string; active: boolean; absences: Prisma.JsonValue }): RecipientPerson {
   return {
     id: row.id,
     name: row.name,
     login: row.login,
     externalId: row.externalId,
+    telegramChatId: row.telegramChatId || "",
     active: row.active,
     absences: readAbsences(row.absences),
   };

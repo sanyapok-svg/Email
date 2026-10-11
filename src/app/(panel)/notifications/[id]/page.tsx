@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import { Notice, PageTitle } from "@/components/shell";
+import { requireAccount } from "@/lib/auth/account";
 import { prisma } from "@/lib/db";
 import { labelStatus } from "@/lib/labels";
 import { retryNotification } from "@/server/ops";
@@ -7,7 +8,8 @@ import { retryNotification } from "@/server/ops";
 export default async function NotificationPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ notice?: string }> }) {
   const { id } = await params;
   const query = await searchParams;
-  const item = await prisma.notification.findUnique({ where: { id }, include: { mailbox: true, message: true, rule: true } });
+  const { accountId } = await requireAccount();
+  const item = await prisma.notification.findFirst({ where: { id, mailbox: { accountId } }, include: { mailbox: true, message: true, rule: true } });
   if (!item) notFound();
   return (
     <>

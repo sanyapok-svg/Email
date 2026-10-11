@@ -1,13 +1,15 @@
 import Link from "next/link";
+import { requireAccount } from "@/lib/auth/account";
 import { Card, PageTitle } from "@/components/shell";
 import { prisma } from "@/lib/db";
 import { labelStatus } from "@/lib/labels";
 
 export default async function DashboardPage() {
+  const { accountId } = await requireAccount();
   const [mailboxes, messages, notices] = await Promise.all([
-    prisma.mailbox.findMany({ orderBy: { name: "asc" } }),
-    prisma.processedMessage.groupBy({ by: ["decision"], _count: true }),
-    prisma.notification.groupBy({ by: ["status"], _count: true }),
+    prisma.mailbox.findMany({ where: { accountId }, orderBy: { name: "asc" } }),
+    prisma.processedMessage.groupBy({ by: ["decision"], where: { mailbox: { accountId } }, _count: true }),
+    prisma.notification.groupBy({ by: ["status"], where: { mailbox: { accountId } }, _count: true }),
   ]);
   const decisionCount = Object.fromEntries(messages.map((item) => [item.decision, item._count]));
   const noticeCount = Object.fromEntries(notices.map((item) => [item.status, item._count]));

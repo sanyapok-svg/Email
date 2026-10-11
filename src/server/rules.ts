@@ -1,7 +1,7 @@
 "use server";
 
 import { redirect } from "next/navigation";
-import { requireUser } from "@/lib/auth/session";
+import { requireAccount } from "@/lib/auth/account";
 import { prisma } from "@/lib/db";
 import { sanitizeNoticeFields } from "@/lib/b24/notice";
 import { withNotice } from "@/lib/http/notice";
@@ -10,16 +10,28 @@ import { clampPreviewChars } from "@/lib/rules/preview-chars";
 import type { ConditionGroup } from "@/lib/rules/types";
 
 export async function saveRule(formData: FormData) {
-  await requireUser();
+  const ctx = await requireAccount();
   const id = String(formData.get("id") || "");
   const mailboxId = String(formData.get("mailboxId") || "");
-  const existing = id ? await prisma.rule.findUnique({ where: { id } }) : null;
+  const existing = id ? await prisma.rule.findFirst({ where: { id, mailbox: { accountId: ctx.accountId } } }) : null;
+  if (id && !existing) redirect(withNotice("/mailboxes", "Правило не найдено"));
+  const mailbox = await prisma.mailbox.findFirst({ where: { id: mailboxId, accountId: ctx.accountId }, select: { id: true } });
+  if (!mailbox) redirect(withNotice("/mailboxes", "Ящик не найден"));
+  const requestedRecipients = formData.getAll("recipientIds").map(String);
+  const ownedRecipients = requestedRecipients.length
+    ? await prisma.b24Recipient.findMany({ where: { accountId: ctx.accountId, id: { in: requestedRecipients } }, select: { id: true } })
+    : [];
+  const recipientIds = ownedRecipients.map((person) => person.id);
+  const requestedForward = String(formData.get("forwardRecipientId") || "");
+  const ownedForward = requestedForward
+    ? await prisma.b24Recipient.findFirst({ where: { id: requestedForward, accountId: ctx.accountId }, select: { id: true } })
+    : null;
   const previous = existing ? normalizeAction(existing.action) : null;
   const conditions = JSON.parse(String(formData.get("conditions") || "{\"op\":\"all\",\"conditions\":[]}")) as ConditionGroup;
-  const recipientIds = formData.getAll("recipientIds").map(String);
   const action = normalizeAction({
     ...(previous ?? {}),
     notificationEnabled: previous ? previous.notificationEnabled : true,
+    notifyChannels: notifyChannelsFrom(formData),
     priority: String(formData.get("priority") || "normal"),
     responseHours: Number(formData.get("responseHours") || 24),
     recipientIds,
@@ -31,7 +43,7 @@ export async function saveRule(formData: FormData) {
     forwardEnabled: formData.get("forwardEnabled") === "1",
     forwardSource: formData.get("forwardSource") === "employee" ? "employee" : "address",
     forwardAddress: String(formData.get("forwardAddress") || "").trim(),
-    forwardRecipientId: String(formData.get("forwardRecipientId") || ""),
+    forwardRecipientId: ownedForward?.id || "",
   });
   const data = {
     mailboxId,
@@ -49,10 +61,10 @@ export async function saveRule(formData: FormData) {
 }
 
 export async function setRuleNotification(formData: FormData) {
-  await requireUser();
+  const ctx = await requireAccount();
   const id = String(formData.get("id") || "");
   const enabled = formData.get("enabled") === "1";
-  const rule = id ? await prisma.rule.findUnique({ where: { id } }) : null;
+  const rule = id ? await prisma.rule.findFirst({ where: { id, mailbox: { accountId: ctx.accountId } } }) : null;
   const fallback = rule ? `/mailboxes#mailbox-${rule.mailboxId}` : "/mailboxes";
   const returnTo = safeReturn(String(formData.get("returnTo") || ""), fallback);
   if (!rule || rule.type !== "notify") redirect(noticeTo("/mailboxes", "Правило не найдено"));
@@ -66,19 +78,19 @@ export async function setRuleNotification(formData: FormData) {
 }
 
 export async function deleteRule(formData: FormData) {
-  await requireUser();
+  const ctx = await requireAccount();
   const id = String(formData.get("id") || "");
-  const rule = id ? await prisma.rule.findUnique({ where: { id }, select: { mailboxId: true } }) : null;
+  const rule = id ? await prisma.rule.findFirst({ where: { id, mailbox: { accountId: ctx.accountId } }, select: { mailboxId: true } }) : null;
   if (!rule) redirect(withNotice("/mailboxes", "Правило не найдено"));
   await prisma.rule.delete({ where: { id } });
   redirect(`${withNotice("/mailboxes", "Правило удалено")}#mailbox-${rule.mailboxId}`);
 }
 
 export async function moveRule(formData: FormData) {
-  await requireUser();
+  const ctx = await requireAccount();
   const id = String(formData.get("id") || "");
   const direction = String(formData.get("direction") || "up");
-  const rule = await prisma.rule.findUnique({ where: { id } });
+  const rule = await prisma.rule.findFirst({ where: { id, mailbox: { accountId: ctx.accountId } } });
   if (!rule) redirect("/mailboxes");
   const fallback = `/mailboxes#mailbox-${rule.mailboxId}`;
   const returnTo = safeReturn(String(formData.get("returnTo") || ""), fallback);
@@ -91,6 +103,10 @@ export async function moveRule(formData: FormData) {
     prisma.rule.update({ where: { id: swapWith.id }, data: { position: rule.position } }),
   ]);
   redirect(returnTo);
+}
+
+function notifyChannelsFrom(formData: FormData): Array<"bitrix" | "telegram"> {
+  return String(formData.get("notifyChannel") || "bitrix") === "telegram" ? ["telegram"] : ["bitrix"];
 }
 
 async function nextPosition(mailboxId: string): Promise<number> {

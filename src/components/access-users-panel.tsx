@@ -8,6 +8,7 @@ export type AccessUserRow = {
   login: string;
   name: string;
   active: boolean;
+  isSuperAdmin: boolean;
 };
 
 type Draft = {
@@ -15,11 +16,21 @@ type Draft = {
   login: string;
   name: string;
   active: boolean;
+  isSuperAdmin: boolean;
 };
 
-const emptyDraft = (): Draft => ({ id: "", login: "", name: "", active: true });
+const emptyDraft = (): Draft => ({ id: "", login: "", name: "", active: true, isSuperAdmin: false });
 
-export function AccessUsersPanel({ users, notice }: { users: AccessUserRow[]; notice?: string }) {
+function canEdit(user: AccessUserRow, currentUserId: string): boolean {
+  return !user.isSuperAdmin || user.id === currentUserId;
+}
+
+function accessLabel(user: AccessUserRow): string {
+  if (user.isSuperAdmin) return user.active ? "суперадмин" : "суперадмин, выключен";
+  return user.active ? "может войти" : "выключен";
+}
+
+export function AccessUsersPanel({ users, notice, currentUserId }: { users: AccessUserRow[]; notice?: string; currentUserId: string }) {
   const [draft, setDraft] = useState<Draft | null>(null);
   const [pendingDelete, setPendingDelete] = useState<AccessUserRow | null>(null);
 
@@ -41,16 +52,20 @@ export function AccessUsersPanel({ users, notice }: { users: AccessUserRow[]; no
               <div>
                 <p className="font-medium">{user.name}</p>
                 <p className="text-sm text-muted">{user.login}</p>
-                <p className="text-sm">{user.active ? "может войти" : "выключен"}</p>
+                <p className="text-sm">{accessLabel(user)}</p>
               </div>
-              <div className="flex gap-2">
-                <button type="button" className="secondary" onClick={() => setDraft(user)}>
-                  Изменить
-                </button>
-                <button type="button" className="secondary" onClick={() => setPendingDelete(user)}>
-                  Удалить
-                </button>
-              </div>
+              {canEdit(user, currentUserId) ? (
+                <div className="flex gap-2">
+                  <button type="button" className="secondary" onClick={() => setDraft(user)}>
+                    Изменить
+                  </button>
+                  {user.isSuperAdmin ? null : (
+                    <button type="button" className="secondary" onClick={() => setPendingDelete(user)}>
+                      Удалить
+                    </button>
+                  )}
+                </div>
+              ) : null}
             </li>
           ))
         )}
@@ -77,16 +92,20 @@ export function AccessUsersPanel({ users, notice }: { users: AccessUserRow[]; no
                 <tr key={user.id} className={user.active ? "" : "text-muted"}>
                   <td>{user.login}</td>
                   <td>{user.name}</td>
-                  <td>{user.active ? "может войти" : "выключен"}</td>
+                  <td>{accessLabel(user)}</td>
                   <td>
-                    <div className="flex justify-end gap-2">
-                      <button type="button" className="bare" onClick={() => setDraft(user)}>
-                        Изменить
-                      </button>
-                      <button type="button" className="bare" onClick={() => setPendingDelete(user)}>
-                        Удалить
-                      </button>
-                    </div>
+                    {canEdit(user, currentUserId) ? (
+                      <div className="flex justify-end gap-2">
+                        <button type="button" className="bare" onClick={() => setDraft(user)}>
+                          Изменить
+                        </button>
+                        {user.isSuperAdmin ? null : (
+                          <button type="button" className="bare" onClick={() => setPendingDelete(user)}>
+                            Удалить
+                          </button>
+                        )}
+                      </div>
+                    ) : null}
                   </td>
                 </tr>
               ))
@@ -117,10 +136,14 @@ export function AccessUsersPanel({ users, notice }: { users: AccessUserRow[]; no
                 placeholder={draft.id ? "оставьте пустым, чтобы не менять" : "не короче 5 символов"}
               />
             </label>
-            <label className="flex items-center gap-2 text-sm">
-              <input style={{ width: "auto" }} type="checkbox" name="active" defaultChecked={draft.active} />
-              Может входить в панель
-            </label>
+            {draft.isSuperAdmin ? (
+              <input type="hidden" name="active" value="on" />
+            ) : (
+              <label className="flex items-center gap-2 text-sm">
+                <input style={{ width: "auto" }} type="checkbox" name="active" defaultChecked={draft.active} />
+                Может входить в панель
+              </label>
+            )}
             <div className="mt-2 flex justify-end gap-2">
               <button type="button" className="secondary" onClick={() => setDraft(null)}>
                 Отмена

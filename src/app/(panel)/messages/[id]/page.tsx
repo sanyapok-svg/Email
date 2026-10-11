@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Notice, PageTitle } from "@/components/shell";
+import { requireAccount } from "@/lib/auth/account";
 import { prisma } from "@/lib/db";
 import { priorityLabel } from "@/lib/b24/notice";
 import { labelStatus } from "@/lib/labels";
@@ -9,8 +10,9 @@ import { storedMessage } from "@/lib/mail/stored";
 export default async function MessagePage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ notice?: string }> }) {
   const { id } = await params;
   const query = await searchParams;
-  const message = await prisma.processedMessage.findUnique({
-    where: { id },
+  const { accountId } = await requireAccount();
+  const message = await prisma.processedMessage.findFirst({
+    where: { id, mailbox: { accountId } },
     include: {
       mailbox: true,
       matchedRule: true,

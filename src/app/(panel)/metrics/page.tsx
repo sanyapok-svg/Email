@@ -1,10 +1,17 @@
+import { requireAccount } from "@/lib/auth/account";
 import { PageTitle } from "@/components/shell";
 import { prisma } from "@/lib/db";
 
 export default async function MetricsPage() {
+  const { accountId } = await requireAccount();
   const [rows, mailboxes] = await Promise.all([
-    prisma.dailyMetric.findMany({ include: { mailbox: { select: { name: true } } }, orderBy: { day: "desc" }, take: 60 }),
-    prisma.mailbox.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true } }),
+    prisma.dailyMetric.findMany({
+      where: { mailbox: { accountId } },
+      include: { mailbox: { select: { name: true } } },
+      orderBy: { day: "desc" },
+      take: 60,
+    }),
+    prisma.mailbox.findMany({ where: { accountId }, orderBy: { name: "asc" }, select: { id: true, name: true } }),
   ]);
   const seen = new Set(rows.map((row) => row.mailboxId));
   const missing = mailboxes.filter((mailbox) => !seen.has(mailbox.id));

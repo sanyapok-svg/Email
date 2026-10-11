@@ -1,15 +1,17 @@
 import { readAbsences } from "@/lib/b24/absences";
 import { OPEN_NOTIFICATION_STATUSES, payloadRecipientIds, recipientIdsOf, type DismissalNotice } from "@/lib/b24/dismiss";
 import { UsersPanel } from "@/components/users-panel";
+import { requireAccount } from "@/lib/auth/account";
 import { prisma } from "@/lib/db";
 
 export default async function B24UsersPage({ searchParams }: { searchParams: Promise<{ notice?: string }> }) {
   const params = await searchParams;
+  const { accountId } = await requireAccount();
   const [users, rules, queued] = await Promise.all([
-    prisma.b24Recipient.findMany({ orderBy: { number: "asc" } }),
-    prisma.rule.findMany({ select: { id: true, name: true, type: true, active: true, action: true, mailbox: { select: { name: true } } } }),
+    prisma.b24Recipient.findMany({ where: { accountId }, orderBy: { number: "asc" } }),
+    prisma.rule.findMany({ where: { mailbox: { accountId } }, select: { id: true, name: true, type: true, active: true, action: true, mailbox: { select: { name: true } } } }),
     prisma.notification.findMany({
-      where: { status: { in: [...OPEN_NOTIFICATION_STATUSES] } },
+      where: { mailbox: { accountId }, status: { in: [...OPEN_NOTIFICATION_STATUSES] } },
       select: { ruleId: true, payload: true },
     }),
   ]);
@@ -30,6 +32,7 @@ export default async function B24UsersPage({ searchParams }: { searchParams: Pro
           login: user.login,
           name: user.name,
           externalId: user.externalId,
+          telegramChatId: user.telegramChatId,
           active: user.active,
           dismissed: user.dismissed,
           absences: readAbsences(user.absences),

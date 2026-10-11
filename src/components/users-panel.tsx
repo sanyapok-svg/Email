@@ -13,6 +13,7 @@ export type B24UserRow = {
   login: string;
   name: string;
   externalId: string;
+  telegramChatId: string;
   active: boolean;
   dismissed: boolean;
   absences: Absence[];
@@ -27,12 +28,13 @@ type Draft = {
   login: string;
   name: string;
   externalId: string;
+  telegramChatId: string;
   active: boolean;
   dismissed: boolean;
   absences: Absence[];
 };
 
-const emptyDraft = (): Draft => ({ id: "", login: "", name: "", externalId: "", active: true, dismissed: false, absences: [] });
+const emptyDraft = (): Draft => ({ id: "", login: "", name: "", externalId: "", telegramChatId: "", active: true, dismissed: false, absences: [] });
 
 export function UsersPanel({ users, notice }: { users: B24UserRow[]; notice?: string }) {
   const [filterOpen, setFilterOpen] = useState(false);
@@ -120,7 +122,7 @@ export function UsersPanel({ users, notice }: { users: B24UserRow[]; notice?: st
               <div>
                 <p className="font-medium">{user.name}</p>
                 <p className="text-sm text-muted">{user.login}</p>
-                <p className="text-sm">ID {user.number} · Б24 {user.externalId}{statusLabel(user)}</p>
+                <p className="text-sm">ID {user.number} · Б24 {user.externalId || "—"} · Telegram {user.telegramChatId || "—"}{statusLabel(user)}</p>
                 <AbsenceNote text={absenceListNote(user.absences, names)} />
               </div>
               <div className="flex gap-2">
@@ -148,13 +150,14 @@ export function UsersPanel({ users, notice }: { users: B24UserRow[]; notice?: st
               <Sortable label="Логин" column="login" sort={sort} onSort={toggleSort} />
               <Sortable label="ФИО" column="name" sort={sort} onSort={toggleSort} />
               <Sortable label="ID Б24" column="externalId" sort={sort} onSort={toggleSort} />
+              <th>Telegram</th>
               <th className="w-36" />
             </tr>
           </thead>
           <tbody>
             {visible.length === 0 ? (
               <tr>
-                <td colSpan={5} className="py-8 text-center text-muted">
+                <td colSpan={6} className="py-8 text-center text-muted">
                   {users.length === 0 ? "Пользователей пока нет. Создайте первого, чтобы выбирать его в правиле." : "Ничего не найдено."}
                 </td>
               </tr>
@@ -168,7 +171,8 @@ export function UsersPanel({ users, notice }: { users: B24UserRow[]; notice?: st
                     {statusLabel(user)}
                     <AbsenceNote text={absenceListNote(user.absences, names)} />
                   </td>
-                  <td>{user.externalId}</td>
+                  <td>{user.externalId || "—"}</td>
+                  <td>{user.telegramChatId || "—"}</td>
                   <td>
                     <div className="flex justify-end gap-1">
                       <button type="button" className="bare" aria-label={`Изменить ${user.name}`} onClick={() => setDraft(copyUser(user))}>
@@ -229,7 +233,12 @@ export function UsersPanel({ users, notice }: { users: B24UserRow[]; notice?: st
             </label>
             <label className="text-sm">
               ID Б24
-              <input className="mt-1" name="externalId" required inputMode="numeric" defaultValue={draft.externalId} placeholder="7" />
+              <input className="mt-1" name="externalId" inputMode="numeric" defaultValue={draft.externalId} placeholder="7, если уведомления идут в Битрикс24" />
+            </label>
+            <label className="text-sm">
+              Chat id Telegram
+              <input className="mt-1" name="telegramChatId" inputMode="numeric" defaultValue={draft.telegramChatId} placeholder="123456789" />
+              <span className="mt-1 block text-xs text-muted">Нужен, если правило отправляет уведомление в Telegram. Число берётся в настройках после того, как сотрудник написал боту.</span>
             </label>
             {draft.dismissed ? (
               <p className="text-sm text-muted">Сотрудник уволен и не получает уведомления.</p>
@@ -292,6 +301,7 @@ function copyUser(user: B24UserRow): Draft {
     login: user.login,
     name: user.name,
     externalId: user.externalId,
+    telegramChatId: user.telegramChatId,
     active: user.active,
     dismissed: user.dismissed,
     absences: user.absences.map((absence) => ({ ...absence, substituteIds: [...absence.substituteIds] })),

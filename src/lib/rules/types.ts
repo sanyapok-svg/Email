@@ -43,8 +43,11 @@ export type Priority = "low" | "normal" | "high" | "critical";
 
 export type NoticeGrouping = "each" | "digest";
 
+export type NotifyChannel = "bitrix" | "telegram";
+
 export type RuleAction = {
   notificationEnabled: boolean;
+  notifyChannels: NotifyChannel[];
   category?: string | null;
   priority: Priority;
   responseHours: number;

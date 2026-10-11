@@ -1,14 +1,16 @@
 import { RuleForm } from "@/components/rule-form";
 import { PageTitle } from "@/components/shell";
+import { requireAccount } from "@/lib/auth/account";
 import { prisma } from "@/lib/db";
 
 export default async function NewRulePage({ searchParams }: { searchParams: Promise<{ mailboxId?: string }> }) {
   const params = await searchParams;
+  const { accountId } = await requireAccount();
   const [mailboxes, recipients, mailboxPolicy] = await Promise.all([
-    prisma.mailbox.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true } }),
-    prisma.b24Recipient.findMany({ where: { active: true, dismissed: false }, orderBy: { name: "asc" }, select: { id: true, name: true, login: true, externalId: true, active: true, dismissed: true } }),
+    prisma.mailbox.findMany({ where: { accountId }, orderBy: { name: "asc" }, select: { id: true, name: true } }),
+    prisma.b24Recipient.findMany({ where: { accountId, active: true, dismissed: false }, orderBy: { name: "asc" }, select: { id: true, name: true, login: true, externalId: true, telegramChatId: true, active: true, dismissed: true } }),
     params.mailboxId
-      ? prisma.mailbox.findUnique({ where: { id: params.mailboxId }, select: { notifyOutsidePolicy: true } })
+      ? prisma.mailbox.findFirst({ where: { id: params.mailboxId, accountId }, select: { notifyOutsidePolicy: true } })
       : Promise.resolve(null),
   ]);
   const mailbox = mailboxes.find((item) => item.id === params.mailboxId) || mailboxes[0];

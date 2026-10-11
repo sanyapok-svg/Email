@@ -16,6 +16,7 @@ export type RecipientPerson = {
   name: string;
   login: string;
   externalId: string;
+  telegramChatId?: string;
   active: boolean;
   absences: Absence[];
 };

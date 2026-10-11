@@ -290,6 +290,7 @@ function rule(id: string, position: number, conditions: RuleRecord["conditions"]
     conditions,
     action: {
       notificationEnabled: true,
+      notifyChannels: ["bitrix"],
       priority: "high",
       responseHours: 8,
       useExtractedDeadline: false,

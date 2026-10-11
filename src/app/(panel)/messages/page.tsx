@@ -2,6 +2,7 @@ import Link from "next/link";
 import { MailboxMessages, type MessageRow } from "@/components/mailbox-messages";
 import { MessageSearch } from "@/components/message-search";
 import { Notice, PageTitle } from "@/components/shell";
+import { requireAccount } from "@/lib/auth/account";
 import { prisma } from "@/lib/db";
 import { forwardOutcome } from "@/lib/mail/forward";
 import { labelStatus } from "@/lib/labels";
@@ -9,8 +10,9 @@ import { searchMessages } from "@/lib/search/messages";
 
 export default async function MessagesPage({ searchParams }: { searchParams: Promise<Record<string, string | undefined>> }) {
   const params = await searchParams;
+  const { accountId } = await requireAccount();
   const [mailboxes, messages] = await Promise.all([
-    prisma.mailbox.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true, address: true } }),
+    prisma.mailbox.findMany({ where: { accountId }, orderBy: { name: "asc" }, select: { id: true, name: true, address: true } }),
     searchMessages({
       q: params.q,
       mailboxId: params.mailboxId,
@@ -26,7 +28,7 @@ export default async function MessagesPage({ searchParams }: { searchParams: Pro
       urgency: params.urgency,
       fromDate: params.fromDate,
       toDate: params.toDate,
-    }),
+    }, accountId),
   ]);
   return (
     <>

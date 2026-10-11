@@ -6,6 +6,7 @@ export type NoticeRecipient = {
   name: string;
   login: string;
   externalId: string;
+  telegramChatId?: string;
 };
 
 const PRIORITY_COLOR: Record<string, string> = {
@@ -25,6 +26,7 @@ export function B24NoticePreview({
   recipients,
   grouping = "each",
   fields,
+  channel = "bitrix",
 }: {
   enabled: boolean;
   mailboxName: string;
@@ -35,7 +37,9 @@ export function B24NoticePreview({
   recipients: NoticeRecipient[];
   grouping?: "each" | "digest";
   fields: readonly string[];
+  channel?: "bitrix" | "telegram";
 }) {
+  const telegram = channel === "telegram";
   const hours = Number.isFinite(responseHours) && responseHours > 0 ? responseHours : 24;
   const due = `через ${hours} ч.`;
   const limit = clampPreviewChars(previewChars);
@@ -64,26 +68,30 @@ export function B24NoticePreview({
 
   return (
     <section className="min-w-0 self-start rounded-xl border border-line bg-card p-4 lg:sticky lg:top-4">
-      <h2 className="font-semibold">Как это получит пользователь в Битрикс24</h2>
+      <h2 className="font-semibold">{telegram ? "Как это получит пользователь в Telegram" : "Как это получит пользователь в Битрикс24"}</h2>
       <p className="mt-1 text-sm text-muted">
         {grouping === "digest"
-          ? "Пример общего сообщения за одну проверку. Такой текст придёт каждому выбранному пользователю личным сообщением в мессенджере от автора веб-хука."
-          : `Пример на письме «${EXAMPLE_SUBJECT}». Такой текст придёт каждому выбранному пользователю личным сообщением в мессенджере от автора веб-хука.`}
+          ? telegram
+            ? "Пример общего сообщения за одну проверку. Такой текст придёт каждому выбранному пользователю от бота."
+            : "Пример общего сообщения за одну проверку. Такой текст придёт каждому выбранному пользователю личным сообщением в мессенджере от автора веб-хука."
+          : telegram
+            ? `Пример на письме «${EXAMPLE_SUBJECT}». Такой текст придёт каждому выбранному пользователю от бота.`
+            : `Пример на письме «${EXAMPLE_SUBJECT}». Такой текст придёт каждому выбранному пользователю личным сообщением в мессенджере от автора веб-хука.`}
       </p>
       {!enabled ? (
-        <p className="mt-4 text-sm">Для этого правила уведомление в Битрикс24 не создаётся.</p>
+        <p className="mt-4 text-sm">{telegram ? "Для этого правила уведомление в Telegram не создаётся." : "Для этого правила уведомление в Битрикс24 не создаётся."}</p>
       ) : recipients.length === 0 ? (
         <p className="mt-4 text-sm">Выберите пользователей слева — без них уведомление некому доставить.</p>
       ) : (
         <div className="mt-4 overflow-hidden rounded-2xl border border-[#d5dde3] bg-white shadow-sm">
           <div className="flex items-center justify-between bg-[#eef2f4] px-4 py-2.5">
-            <span className="text-sm font-semibold text-[#333]">Мессенджер</span>
-            <span className="text-xs text-[#828b95]">от автора веб-хука</span>
+            <span className="text-sm font-semibold text-[#333]">{telegram ? "Telegram" : "Мессенджер"}</span>
+            <span className="text-xs text-[#828b95]">{telegram ? "от бота" : "от автора веб-хука"}</span>
           </div>
           <div className="bg-[#f1f4f6] px-4 py-3">
             <div className="ml-auto max-w-[92%] rounded-2xl rounded-br-md bg-white px-3 py-2 shadow-sm">
               <p className="text-xs font-semibold" style={{ color: PRIORITY_COLOR[priority] || PRIORITY_COLOR.normal }}>
-                {fields.includes("priority") ? `Автор веб-хука · ${priorityLabel(priority)}` : "Автор веб-хука"}
+                {fields.includes("priority") ? `${telegram ? "Бот" : "Автор веб-хука"} · ${priorityLabel(priority)}` : telegram ? "Бот" : "Автор веб-хука"}
               </p>
               <p className="mt-1 whitespace-pre-line break-words text-sm leading-5 text-[#333]">{text}</p>
             </div>
@@ -91,7 +99,8 @@ export function B24NoticePreview({
                 {recipients.map((person) => (
                   <li key={person.id}>
                     {person.name}
-                    {person.login ? ` · ${person.login}` : ""} · ID Б24 {person.externalId}
+                    {person.login ? ` · ${person.login}` : ""}
+                    {telegram ? ` · chat id ${person.telegramChatId || "не указан"}` : person.externalId ? ` · ID Б24 ${person.externalId}` : ""}
                   </li>
                 ))}
               </ul>

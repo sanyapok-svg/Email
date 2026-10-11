@@ -3,13 +3,15 @@ import { MailboxControls } from "@/components/mailbox-controls";
 import { MailboxForm } from "@/components/mailbox-form";
 import { ConfirmDelete } from "@/components/confirm-delete";
 import { Notice, PageTitle } from "@/components/shell";
+import { requireAccount } from "@/lib/auth/account";
 import { prisma } from "@/lib/db";
 import { deleteMailbox, testMailboxImap } from "@/server/mailboxes";
 
 export default async function MailboxPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ notice?: string }> }) {
   const { id } = await params;
   const query = await searchParams;
-  const mailbox = await prisma.mailbox.findUnique({ where: { id } });
+  const { accountId } = await requireAccount();
+  const mailbox = await prisma.mailbox.findFirst({ where: { id, accountId } });
   if (!mailbox) notFound();
   return (
     <>

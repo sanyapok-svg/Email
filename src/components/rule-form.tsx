@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useState } from "react";
+import type { NotifyChannel } from "@/lib/rules/types";
 import { B24NoticePreview, type NoticeRecipient } from "@/components/b24-notice-preview";
 import { DEFAULT_NOTICE_FIELDS, NOTICE_FIELDS } from "@/lib/b24/notice";
 import { isEmail } from "@/lib/mail/forward";
@@ -21,7 +22,7 @@ export function RuleForm({
 }: {
   mailboxId?: string;
   mailboxes: Array<{ id: string; name: string }>;
-  recipients: Array<NoticeRecipient & { active: boolean; dismissed?: boolean }>;
+  recipients: Array<NoticeRecipient & { active: boolean; dismissed?: boolean; telegramChatId?: string }>;
   initial?: {
     id: string;
     mailboxId: string;
@@ -34,6 +35,7 @@ export function RuleForm({
     responseHours: number;
     previewChars: number;
     recipientIds: string[];
+    notifyChannel?: NotifyChannel;
     notifyOutsidePolicy: string;
     noticeGrouping: "each" | "digest";
     noticeFields: string[];
@@ -54,6 +56,7 @@ export function RuleForm({
   const [responseHours, setResponseHours] = useState(initial?.responseHours || 24);
   const [previewChars, setPreviewChars] = useState(initial?.previewChars || PREVIEW_CHARS_DEFAULT);
   const [picked, setPicked] = useState<string[]>(initial?.recipientIds || []);
+  const [notifyChannel, setNotifyChannel] = useState<NotifyChannel>(initial?.notifyChannel === "telegram" ? "telegram" : "bitrix");
   const [outsidePolicy, setOutsidePolicy] = useState(initial?.notifyOutsidePolicy || defaults?.notifyOutsidePolicy || "defer");
   const [noticeGrouping, setNoticeGrouping] = useState<"each" | "digest">(initial?.noticeGrouping || "each");
   const [noticeFields, setNoticeFields] = useState<string[]>(initial ? initial.noticeFields : [...DEFAULT_NOTICE_FIELDS]);
@@ -155,9 +158,21 @@ export function RuleForm({
         />
         <div className="grid items-start gap-4 lg:grid-cols-2">
           <section className="grid min-w-0 content-start gap-2 rounded-xl border border-line bg-card p-4">
-            <h2 className="font-semibold">Получатели в Битрикс24</h2>
+            <h2 className="font-semibold">Куда отправить</h2>
+            <label className="text-sm">
+              Тип уведомления
+              <select className="mt-1" name="notifyChannel" value={notifyChannel} onChange={(event) => setNotifyChannel(event.target.value === "telegram" ? "telegram" : "bitrix")}>
+                <option value="bitrix">Битрикс24</option>
+                <option value="telegram">Telegram</option>
+              </select>
+            </label>
             <p className="text-sm text-muted">
-              Отметьте, кому уйдёт уведомление. Список ведётся в разделе <Link className="underline" href="/b24-users">Сотрудники Б24</Link>.
+              {notifyChannel === "telegram"
+                ? "Сообщение придёт в Telegram тем, у кого в карточке сотрудника указан chat id. Токен бота задаётся в настройках."
+                : "Сообщение придёт в чат Битрикс24. Список сотрудников ведётся в разделе сотрудников."}{" "}
+              <Link className="underline" href={notifyChannel === "telegram" ? "/settings" : "/b24-users"}>
+                {notifyChannel === "telegram" ? "Как подключить бота" : "Сотрудники"}
+              </Link>
             </p>
             {listed.length === 0 ? (
               <p className="text-sm">Активных пользователей пока нет.</p>
@@ -178,7 +193,8 @@ export function RuleForm({
                     <span>
                       <span className="font-medium">{item.name}</span>
                       <span className="block text-muted">
-                        {item.login} · ID Б24 {item.externalId}
+                        {item.login}
+                        {notifyChannel === "telegram" ? ` · Telegram ${item.telegramChatId || "нет chat id"}` : item.externalId ? ` · ID Б24 ${item.externalId}` : ""}
                         {item.dismissed ? " · уволен" : item.active ? "" : " · выключен"}
                       </span>
                     </span>
@@ -258,6 +274,7 @@ export function RuleForm({
             recipients={chosen}
             grouping={noticeGrouping}
             fields={noticeFields}
+            channel={notifyChannel}
           />
         </div>
         <button type="submit">Сохранить правило</button>

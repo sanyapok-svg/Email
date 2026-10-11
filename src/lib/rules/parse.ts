@@ -2,7 +2,7 @@ import type { WorkInterval, WorkSchedule } from "@/lib/hours/schedule";
 import type { OutsidePolicy } from "@/lib/hours/schedule";
 import { DEFAULT_NOTICE_FIELDS, NOTICE_FIELDS, sanitizeNoticeFields } from "@/lib/b24/notice";
 import { clampPreviewChars } from "@/lib/rules/preview-chars";
-import type { ConditionNode, Priority, RuleAction, RuleRecord } from "@/lib/rules/types";
+import type { ConditionNode, NotifyChannel, Priority, RuleAction, RuleRecord } from "@/lib/rules/types";
 
 const PRIORITIES: Priority[] = ["low", "normal", "high", "critical"];
 
@@ -36,6 +36,7 @@ export function normalizeAction(value: unknown): RuleAction {
   const responseHours = Number(raw.responseHours);
   return {
     notificationEnabled: Boolean(raw.notificationEnabled),
+    notifyChannels: notifyChannelsOf(raw.notifyChannels),
     category: raw.category ?? null,
     priority,
     responseHours: Number.isFinite(responseHours) && responseHours > 0 ? responseHours : 24,
@@ -52,6 +53,12 @@ export function normalizeAction(value: unknown): RuleAction {
     forwardAddress: typeof raw.forwardAddress === "string" ? raw.forwardAddress.trim() : "",
     forwardRecipientId: typeof raw.forwardRecipientId === "string" ? raw.forwardRecipientId : "",
   };
+}
+
+function notifyChannelsOf(value: unknown): NotifyChannel[] {
+  const list = Array.isArray(value) ? value.map(String) : [];
+  const channels = [...new Set(list.filter((item): item is NotifyChannel => item === "bitrix" || item === "telegram"))];
+  return channels.length ? channels : ["bitrix"];
 }
 
 function resolveNoticeFields(raw: Partial<RuleAction> & { noticeMetaOptional?: boolean }) {

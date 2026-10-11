@@ -170,7 +170,7 @@ async function processUid(connector: ImapConnector, mailbox: Mailbox, uid: bigin
 }
 
 async function persistMessage(mailbox: Mailbox, uid: bigint, uidValidity: bigint, message: NormalizedMessage, elapsedMs: number, pollToken: string) {
-  const config = await getIntegrationConfig();
+  const config = await getIntegrationConfig(mailbox.accountId);
   const rules = (await prisma.rule.findMany({ where: { mailboxId: mailbox.id } })).flatMap((row) => {
     const parsed = parseStoredRule(row);
     return parsed ? [parsed] : [];

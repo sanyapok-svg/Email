@@ -9,10 +9,11 @@ const LINKS = [
   ["/settings", "Настройки"],
 ];
 
-export function Nav({ pathname }: { pathname: string }) {
+export function Nav({ pathname, showAccounts = false }: { pathname: string; showAccounts?: boolean }) {
+  const links = showAccounts ? [...LINKS, ["/accounts", "Аккаунты"]] : LINKS;
   return (
     <nav className="flex gap-1 overflow-x-auto px-3 pb-3 md:flex-col md:overflow-visible md:pb-0">
-      {LINKS.map(([href, label]) => {
+      {links.map(([href, label]) => {
         const active = href === "/" ? pathname === "/" : pathname.startsWith(href) || (href === "/mailboxes" && pathname.startsWith("/rules"));
         return (
           <a

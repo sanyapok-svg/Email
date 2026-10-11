@@ -5,6 +5,7 @@ import type { RuleAction } from "@/lib/rules/types";
 
 const action = (patch: Partial<RuleAction> = {}): RuleAction => ({
   notificationEnabled: true,
+  notifyChannels: ["bitrix"],
   priority: "normal",
   responseHours: 24,
   useExtractedDeadline: false,
