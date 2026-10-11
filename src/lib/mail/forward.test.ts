@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { emptyMessage } from "@/lib/mail/model";
-import { forwardLetter, resolveForwardAddress } from "@/lib/mail/forward";
+import { forwardLetter, forwardOutcome, resolveForwardAddress } from "@/lib/mail/forward";
 import type { RuleAction } from "@/lib/rules/types";
 
 const action = (patch: Partial<RuleAction> = {}): RuleAction => ({
@@ -50,5 +50,14 @@ describe("forward letter", () => {
     expect(letter.text).toContain("Просим подписать.");
     expect(letter.text).toContain("dogovor.pdf");
     expect(letter.text).toContain("Файлы вложений не пересылаются");
+  });
+});
+
+describe("forward outcome", () => {
+  it("names the queue state and keeps the send error", () => {
+    expect(forwardOutcome("pending", null)).toBe("пересылка: в очереди");
+    expect(forwardOutcome("sent", null)).toBe("пересылка: отправлено");
+    expect(forwardOutcome("error", "Яндекс отклонил отправителя")).toBe("пересылка: ошибка. Яндекс отклонил отправителя");
+    expect(forwardOutcome("sent", "Копия не попала")).toBe("пересылка: отправлено. Копия не попала");
   });
 });

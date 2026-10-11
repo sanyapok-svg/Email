@@ -14,6 +14,7 @@ export async function mailboxPollWorkflow(token: string) {
   "use workflow";
   const waitMs = await runDuePoll(token);
   if (waitMs == null) return;
+  await runDispatch(token);
   await sleep(waitMs);
   await scheduleNextPoll(token);
 }
@@ -22,9 +23,10 @@ async function runDuePoll(token: string): Promise<number | null> {
   "use step";
   if (!(await ownsChain(token))) return null;
   try {
-    await pollDueMailboxes();
-  } finally {
-    await dispatchQueues();
+    await pollDueMailboxes({ deliver: false });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "poll failed";
+    logEvent("error", "poll.step_failed", { message: message.slice(0, 200) });
   }
   const waitMs = await msUntilNextPoll();
   const extended = await prisma.schedulerLock.updateMany({
@@ -34,6 +36,12 @@ async function runDuePoll(token: string): Promise<number | null> {
   if (extended.count === 0) return null;
   logEvent("info", "poll.chain_sleep", { waitSec: Math.round(waitMs / 1000) });
   return waitMs;
+}
+
+async function runDispatch(token: string): Promise<void> {
+  "use step";
+  if (!(await ownsChain(token))) return;
+  await dispatchQueues();
 }
 
 async function scheduleNextPoll(token: string) {

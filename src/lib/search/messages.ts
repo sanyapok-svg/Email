@@ -29,7 +29,11 @@ export async function searchMessages(input: MessageSearchInput) {
     where,
     orderBy: { receivedAt: "desc" },
     take: 50,
-    include: { mailbox: { select: { name: true, address: true } }, matchedRule: { select: { name: true } } },
+    include: {
+      mailbox: { select: { name: true, address: true } },
+      matchedRule: { select: { name: true } },
+      replies: { where: { kind: "forward" }, select: { status: true, lastError: true }, orderBy: { createdAt: "desc" } },
+    },
   });
 }
 

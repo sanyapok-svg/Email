@@ -3,6 +3,9 @@ import { calendarDay, coveringSubstituteIds, readAbsences, resolveRecipients, ty
 import { deliverToBitrix } from "@/lib/b24/adapter";
 import { decryptSecret } from "@/lib/crypto/secrets";
 import { prisma } from "@/lib/db";
+import { isEmail } from "@/lib/mail/forward";
+import { queueMissingForwards } from "@/lib/mail/forward-queue";
+import { saveSentCopy } from "@/lib/mail/sent-copy";
 import { sendMailboxMail } from "@/lib/mail/smtp";
 import { safeError } from "@/lib/imap/connector";
 import { logEvent } from "@/lib/log";
@@ -68,6 +71,12 @@ async function failNotification(id: string, mailboxId: string, timezone: string,
 }
 
 async function dispatchForwards() {
+  await queueMissingForwards();
+  const staleBefore = new Date(Date.now() - 2 * 60 * 1000);
+  await prisma.outboundReply.updateMany({
+    where: { kind: "forward", status: "sending", updatedAt: { lt: staleBefore } },
+    data: { status: "pending" },
+  });
   const now = new Date();
   const items = await prisma.outboundReply.findMany({
     where: {
@@ -87,9 +96,9 @@ async function dispatchForwards() {
       const secret = item.mailbox.smtpPasswordEnc || item.mailbox.imapPasswordEnc;
       password = secret ? decryptSecret(secret) : "";
       const user = item.mailbox.smtpUser || item.mailbox.imapUser;
-      const fromAddress = item.mailbox.smtpFromAddress || item.mailbox.address || user;
+      const fromAddress = item.mailbox.smtpFromAddress?.trim() || (isEmail(user) ? user.trim() : "") || item.mailbox.address;
       if (!password || !user || !fromAddress) throw new Error("У ящика нет данных для отправки почты");
-      await sendMailboxMail({
+      const raw = await sendMailboxMail({
         host: item.mailbox.smtpHost || "smtp.yandex.com",
         port: item.mailbox.smtpPort || 465,
         secure: item.mailbox.smtpSecure,
@@ -101,7 +110,30 @@ async function dispatchForwards() {
         subject: item.subject,
         text: item.bodyText,
       });
-      await prisma.outboundReply.update({ where: { id: item.id }, data: { status: "sent", sentAt: new Date(), lastError: null } });
+      let copyError = "";
+      try {
+        await saveSentCopy(
+          {
+            host: item.mailbox.imapHost,
+            port: item.mailbox.imapPort,
+            secure: item.mailbox.imapSecure,
+            user: item.mailbox.imapUser,
+            password,
+          },
+          raw,
+        );
+      } catch (error) {
+        copyError = safeError(error, [password]);
+        logEvent("warn", "forward.sent_copy_failed", { mailboxId: item.mailboxId, replyId: item.id, message: copyError });
+      }
+      await prisma.outboundReply.update({
+        where: { id: item.id },
+        data: {
+          status: "sent",
+          sentAt: new Date(),
+          lastError: copyError ? `Письмо ушло получателю. Копия не попала в «Отправленные»: ${copyError}`.slice(0, 500) : null,
+        },
+      });
       logEvent("info", "forward.sent", { mailboxId: item.mailboxId, replyId: item.id });
     } catch (error) {
       const nextAttempts = item.attempts + 1;

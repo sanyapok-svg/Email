@@ -5,7 +5,8 @@ import { prisma } from "@/lib/db";
 import { ImapConnector, safeError } from "@/lib/imap/connector";
 import { logEvent } from "@/lib/log";
 import { isConnectionDue } from "@/lib/mail/next-connection";
-import { forwardLetter, resolveForwardAddress, type ForwardEmployee } from "@/lib/mail/forward";
+import { forwardLetter } from "@/lib/mail/forward";
+import { resolveForwardTargets } from "@/lib/mail/forward-queue";
 import { buildNormalizedMessage, buildSearchDocument } from "@/lib/mail/pipeline";
 import type { NormalizedMessage } from "@/lib/mail/model";
 import { bumpMetrics } from "@/lib/metrics/counters";
@@ -15,12 +16,11 @@ import { DIGEST_PART, flushDigestParts, holdDigest } from "@/lib/orchestration/d
 import { dispatchQueues } from "@/lib/queues/dispatch";
 import { matchingRules } from "@/lib/rules/engine";
 import { parsePolicy, parseSchedule, parseStoredRule } from "@/lib/rules/parse";
-import type { RuleRecord } from "@/lib/rules/types";
 import { getIntegrationConfig } from "@/lib/settings";
 
 const REAL_NOTICE = ["pending", "scheduled", "sending", "sent"];
 
-export async function pollDueMailboxes() {
+export async function pollDueMailboxes(options: { deliver?: boolean } = {}) {
   const mailboxes = await prisma.mailbox.findMany({
     where: { active: true, autoPoll: true },
     select: {
@@ -46,11 +46,11 @@ export async function pollDueMailboxes() {
       schedule: parseSchedule(mailbox),
     });
     if (!due) continue;
-    await pollMailbox(mailbox.id);
+    await pollMailbox(mailbox.id, options);
   }
 }
 
-export async function pollMailbox(mailboxId: string, options: { force?: boolean } = {}) {
+export async function pollMailbox(mailboxId: string, options: { force?: boolean; deliver?: boolean } = {}) {
   return withLock(`poll:${mailboxId}`, 90_000, async () => {
     const mailbox = await prisma.mailbox.findUnique({ where: { id: mailboxId } });
     if (!mailbox || !mailbox.active) return;
@@ -63,6 +63,7 @@ export async function pollMailbox(mailboxId: string, options: { force?: boolean 
       schedule: parseSchedule(mailbox),
     })) return;
     let deliver = false;
+    const shouldDeliver = options.deliver !== false;
     const pollToken = randomUUID();
     const password = decryptSecret(mailbox.imapPasswordEnc);
     const connector = new ImapConnector({
@@ -72,7 +73,7 @@ export async function pollMailbox(mailboxId: string, options: { force?: boolean 
       user: mailbox.imapUser,
       password,
     });
-    deliver = true;
+    deliver = shouldDeliver;
     try {
       await flushDigestParts({ mailboxId: mailbox.id });
       await connector.connect();
@@ -109,12 +110,10 @@ export async function pollMailbox(mailboxId: string, options: { force?: boolean 
       });
       logEvent("error", "imap.poll_failed", { mailboxId: mailbox.id, message });
     } finally {
-      if (deliver) {
-        try {
-          await flushDigestParts({ mailboxId: mailbox.id, pollToken });
-        } catch (error) {
-          logEvent("error", "notify.digest_failed", { mailboxId: mailbox.id, message: safeError(error, []) });
-        }
+      try {
+        await flushDigestParts({ mailboxId: mailbox.id, pollToken });
+      } catch (error) {
+        logEvent("error", "notify.digest_failed", { mailboxId: mailbox.id, message: safeError(error, []) });
       }
       await connector.close();
       if (deliver) {
@@ -193,7 +192,7 @@ async function persistMessage(mailbox: Mailbox, uid: bigint, uidValidity: bigint
     ...pauses,
     ruleNotificationsLastHour: counts.get(ruleId) ?? 0,
   }));
-  const forwards = await plannedForwards(matched);
+  const forwards = await resolveForwardTargets(matched);
   const letter = forwardLetter(message);
   const maxAttempts = config.notifyMaxAttempts;
 
@@ -254,26 +253,6 @@ async function persistMessage(mailbox: Mailbox, uid: bigint, uidValidity: bigint
     decision: plan.decision,
     ms: elapsedMs,
   });
-}
-
-async function plannedForwards(rules: RuleRecord[]): Promise<Array<{ rule: RuleRecord; to: string }>> {
-  const wanted = rules.filter((rule) => rule.action.forwardEnabled);
-  if (!wanted.length) return [];
-  const ids = [...new Set(wanted.map((rule) => rule.action.forwardRecipientId).filter(Boolean))];
-  const people = ids.length
-    ? await prisma.b24Recipient.findMany({ where: { id: { in: ids } }, select: { id: true, login: true, active: true, dismissed: true } })
-    : [];
-  const byId = new Map<string, ForwardEmployee>(people.map((person) => [person.id, person]));
-  const planned: Array<{ rule: RuleRecord; to: string }> = [];
-  for (const rule of wanted) {
-    const to = resolveForwardAddress(rule.action, byId.get(rule.action.forwardRecipientId) ?? null);
-    if (!to) {
-      logEvent("warn", "forward.no_address", { ruleId: rule.id });
-      continue;
-    }
-    planned.push({ rule, to });
-  }
-  return planned;
 }
 
 async function pauseFlags(

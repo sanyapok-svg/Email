@@ -3,6 +3,7 @@ import { MailboxMessages, type MessageRow } from "@/components/mailbox-messages"
 import { MessageSearch } from "@/components/message-search";
 import { Notice, PageTitle } from "@/components/shell";
 import { prisma } from "@/lib/db";
+import { forwardOutcome } from "@/lib/mail/forward";
 import { labelStatus } from "@/lib/labels";
 import { searchMessages } from "@/lib/search/messages";
 
@@ -70,6 +71,7 @@ function MessageGroups({
       fromEmail: message.fromEmail,
       decision: labelStatus(message.decision),
       ruleName: message.matchedRule?.name ?? null,
+      forward: message.replies.map((reply) => forwardOutcome(reply.status, reply.lastError)).join(" · ") || null,
       entities: [message.phonesNormalized[0], message.contractNumbers[0], message.invoiceNumbers[0], message.urgencyLevel].filter(Boolean).join(" · ") || "—",
     });
     groups.set(message.mailboxId, group);

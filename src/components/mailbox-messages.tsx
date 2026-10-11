@@ -11,6 +11,7 @@ export type MessageRow = {
   fromEmail: string;
   decision: string;
   ruleName: string | null;
+  forward: string | null;
   entities: string;
 };
 
@@ -85,6 +86,7 @@ export function MailboxMessages({
                     <td>
                       {message.decision}
                       {message.ruleName ? <div className="text-xs text-muted">{message.ruleName}</div> : null}
+                      {message.forward ? <div className="mt-1 break-words text-xs text-muted">{message.forward}</div> : null}
                     </td>
                     <td className="text-xs">{message.entities}</td>
                   </tr>
