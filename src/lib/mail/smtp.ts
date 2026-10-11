@@ -33,46 +33,67 @@ export function compileMailboxMail(input: Pick<MailboxMail, "fromName" | "fromAd
   return Buffer.from(`${headers.join("\r\n")}\r\n\r\n${body}`, "utf8");
 }
 
+export function smtpEndpointPlan(host: string, v4: string, v6: string): SmtpEndpoint[] {
+  const ports = [
+    { port: 465, secure: true },
+    { port: 587, secure: false },
+  ];
+  const endpoints: SmtpEndpoint[] = [];
+  for (const item of ports) {
+    if (v4) endpoints.push({ host: v4, servername: host, port: item.port, secure: item.secure, label: `${item.port}/v4` });
+    if (v6) endpoints.push({ host: v6, servername: host, port: item.port, secure: item.secure, label: `${item.port}/v6` });
+  }
+  if (!endpoints.length) {
+    for (const item of ports) endpoints.push({ host, servername: host, port: item.port, secure: item.secure, label: String(item.port) });
+  }
+  return endpoints;
+}
+
 export async function sendMailboxMail(input: MailboxMail): Promise<Buffer> {
   const raw = compileMailboxMail(input);
-  const target = await ipv4Host(input.host);
-  const attempts = smtpAttempts(input.port, input.secure);
-  let lastError: unknown;
-  for (let index = 0; index < attempts.length; index += 1) {
-    const attempt = attempts[index];
+  const endpoints = smtpEndpointPlan(input.host, ...(await resolveMailHosts(input.host)));
+  const errors: string[] = [];
+  for (const endpoint of endpoints) {
     try {
-      await deliver(input, raw, target, attempt);
+      await deliver(input, raw, endpoint);
       return raw;
     } catch (error) {
-      lastError = error;
-      if (index === attempts.length - 1 || !canTryNextPort(error)) throw error;
+      const message = error instanceof Error ? error.message : "ошибка соединения";
+      errors.push(`${endpoint.label}: ${message}`);
+      if (!canTryNextPort(error)) break;
     }
   }
-  throw lastError instanceof Error ? lastError : new Error("Почта не отправлена");
+  throw new Error(`Нет соединения с почтовым сервером. ${errors.join("; ")}`.slice(0, 500));
 }
 
-function smtpAttempts(port: number, secure: boolean): Array<{ port: number; secure: boolean }> {
-  const primary = port === 465 ? { port: 465, secure: true } : port === 587 ? { port: 587, secure: false } : { port, secure };
-  const alternate = primary.port === 465 ? { port: 587, secure: false } : { port: 465, secure: true };
-  return [primary, alternate];
+async function resolveMailHosts(host: string): Promise<[string, string]> {
+  if (net.isIP(host)) return net.isIPv6(host) ? ["", host] : [host, ""];
+  const [v4, v6] = await Promise.all([
+    dns.resolve4(host).then((addresses) => addresses[0] || "").catch(() => ""),
+    dns.resolve6(host).then((addresses) => addresses[0] || "").catch(() => ""),
+  ]);
+  return [v4, v6];
 }
 
-async function deliver(
-  input: MailboxMail,
-  raw: Buffer,
-  target: { host: string; servername?: string },
-  attempt: { port: number; secure: boolean },
-): Promise<void> {
+type SmtpEndpoint = {
+  host: string;
+  servername: string;
+  port: number;
+  secure: boolean;
+  label: string;
+};
+
+async function deliver(input: MailboxMail, raw: Buffer, endpoint: SmtpEndpoint): Promise<void> {
   const transport = mailer().createTransport({
-    host: target.host,
-    port: attempt.port,
-    secure: attempt.secure,
-    requireTLS: !attempt.secure,
+    host: endpoint.host,
+    port: endpoint.port,
+    secure: endpoint.secure,
+    requireTLS: !endpoint.secure,
     auth: { user: input.user, pass: input.password },
-    tls: { ...mailTlsOptions(), servername: target.servername },
-    connectionTimeout: 10_000,
-    greetingTimeout: 10_000,
-    socketTimeout: 15_000,
+    tls: { ...mailTlsOptions(), servername: endpoint.servername },
+    connectionTimeout: 12_000,
+    greetingTimeout: 12_000,
+    socketTimeout: 20_000,
   });
   try {
     await transport.sendMail({
@@ -81,18 +102,6 @@ async function deliver(
     });
   } finally {
     transport.close();
-  }
-}
-
-async function ipv4Host(host: string): Promise<{ host: string; servername?: string }> {
-  if (net.isIP(host)) return { host };
-  try {
-    const addresses = await dns.resolve4(host);
-    const address = addresses.find(Boolean);
-    if (!address) return { host };
-    return { host: address, servername: host };
-  } catch {
-    return { host };
   }
 }
 

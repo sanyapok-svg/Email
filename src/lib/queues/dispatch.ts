@@ -72,6 +72,14 @@ async function failNotification(id: string, mailboxId: string, timezone: string,
 
 async function dispatchForwards() {
   await queueMissingForwards();
+  await prisma.outboundReply.updateMany({
+    where: {
+      kind: "forward",
+      status: { in: ["error", "pending"] },
+      OR: [{ lastError: { contains: "Connection timeout" } }, { lastError: { contains: "Нет соединения" } }],
+    },
+    data: { status: "pending", attempts: 0, nextAttemptAt: null },
+  });
   const staleBefore = new Date(Date.now() - 2 * 60 * 1000);
   await prisma.outboundReply.updateMany({
     where: { kind: "forward", status: "sending", updatedAt: { lt: staleBefore } },
