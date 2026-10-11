@@ -19,7 +19,7 @@ export function MailboxForm({ mailbox }: { mailbox?: Mailbox }) {
         <Check name="active" label="Ящик и все правила активны" defaultChecked={mailbox?.active} />
         <Check name="imapSecure" label="IMAP SSL" defaultChecked={mailbox?.imapSecure ?? true} />
       </div>
-      <div className="grid gap-3 md:grid-cols-3">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         <Field name="batchSize" label="Писем за проход" defaultValue={String(mailbox?.batchSize || 8)} />
         <Field name="bodyCharLimit" label="Лимит текста" defaultValue={String(mailbox?.bodyCharLimit || 150000)} />
         <Field name="entityListLimit" label="Лимит сущностей" defaultValue={String(mailbox?.entityListLimit || 40)} />
@@ -27,7 +27,14 @@ export function MailboxForm({ mailbox }: { mailbox?: Mailbox }) {
         <Field name="senderPauseMinutes" label="Пауза отправителя, мин" defaultValue={String(mailbox?.senderPauseMinutes ?? 60)} />
         <Field name="subjectPauseMinutes" label="Пауза темы, мин" defaultValue={String(mailbox?.subjectPauseMinutes || 0)} />
         <Field name="domainPauseMinutes" label="Пауза домена, мин" defaultValue={String(mailbox?.domainPauseMinutes || 0)} />
+        <Field
+          name="retentionDays"
+          label="Срок хранения, дни. Пусто — не удалять"
+          defaultValue={mailbox?.retentionDays == null ? "" : String(mailbox.retentionDays)}
+          placeholder="хранить всё"
+        />
       </div>
+      <p className="text-xs text-muted">Срок хранения относится только к этому ящику: сервис удаляет у себя старые письма и их уведомления. Письма в Яндексе остаются.</p>
       <p className="text-xs text-muted">Пароль после сохранения показывается только как маска и хранится в зашифрованном виде.</p>
       <button type="submit">{mailbox ? "Сохранить ящик" : "Создать ящик"}</button>
     </form>

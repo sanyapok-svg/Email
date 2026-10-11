@@ -4,7 +4,7 @@ import { MailboxForm } from "@/components/mailbox-form";
 import { ConfirmDelete } from "@/components/confirm-delete";
 import { Notice, PageTitle } from "@/components/shell";
 import { prisma } from "@/lib/db";
-import { deleteMailbox, installStarterRules, testMailboxImap } from "@/server/mailboxes";
+import { deleteMailbox, testMailboxImap } from "@/server/mailboxes";
 
 export default async function MailboxPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ notice?: string }> }) {
   const { id } = await params;
@@ -22,7 +22,6 @@ export default async function MailboxPage({ params, searchParams }: { params: Pr
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <MailboxControls id={id} active={mailbox.active} returnTo={`/mailboxes/${id}`} />
         <form action={testMailboxImap}><input type="hidden" name="id" value={id} /><button className="secondary" type="submit">Проверить IMAP</button></form>
-        <form action={installStarterRules}><input type="hidden" name="id" value={id} /><button className="secondary" type="submit">Добавить исключения</button></form>
         <ConfirmDelete
           action={deleteMailbox}
           id={id}

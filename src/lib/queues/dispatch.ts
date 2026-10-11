@@ -3,6 +3,8 @@ import { calendarDay, coveringSubstituteIds, readAbsences, resolveRecipients, ty
 import { deliverToBitrix } from "@/lib/b24/adapter";
 import { decryptSecret } from "@/lib/crypto/secrets";
 import { prisma } from "@/lib/db";
+import { sendMailboxMail } from "@/lib/mail/smtp";
+import { safeError } from "@/lib/imap/connector";
 import { logEvent } from "@/lib/log";
 import { bumpMetrics } from "@/lib/metrics/counters";
 import { backoffDate } from "@/lib/orchestration/decide";
@@ -11,6 +13,7 @@ import { getIntegrationConfig } from "@/lib/settings";
 
 export async function dispatchQueues() {
   await dispatchNotifications();
+  await dispatchForwards();
   await applyRetention();
 }
 
@@ -62,6 +65,61 @@ async function failNotification(id: string, mailboxId: string, timezone: string,
   });
   await bumpMetrics(mailboxId, timezone, { notificationErrors: 1 });
   logEvent("error", "notify.failed", { mailboxId, notificationId: id, message: error });
+}
+
+async function dispatchForwards() {
+  const now = new Date();
+  const items = await prisma.outboundReply.findMany({
+    where: {
+      kind: "forward",
+      status: "pending",
+      OR: [{ nextAttemptAt: null }, { nextAttemptAt: { lte: now } }],
+    },
+    orderBy: { createdAt: "asc" },
+    take: 20,
+    include: { mailbox: true },
+  });
+  for (const item of items) {
+    const claimed = await prisma.outboundReply.updateMany({ where: { id: item.id, status: "pending" }, data: { status: "sending" } });
+    if (claimed.count !== 1) continue;
+    let password = "";
+    try {
+      const secret = item.mailbox.smtpPasswordEnc || item.mailbox.imapPasswordEnc;
+      password = secret ? decryptSecret(secret) : "";
+      const user = item.mailbox.smtpUser || item.mailbox.imapUser;
+      const fromAddress = item.mailbox.smtpFromAddress || item.mailbox.address || user;
+      if (!password || !user || !fromAddress) throw new Error("У ящика нет данных для отправки почты");
+      await sendMailboxMail({
+        host: item.mailbox.smtpHost || "smtp.yandex.com",
+        port: item.mailbox.smtpPort || 465,
+        secure: item.mailbox.smtpSecure,
+        user,
+        password,
+        fromName: item.mailbox.smtpFromName || item.mailbox.name,
+        fromAddress,
+        to: item.toAddress,
+        subject: item.subject,
+        text: item.bodyText,
+      });
+      await prisma.outboundReply.update({ where: { id: item.id }, data: { status: "sent", sentAt: new Date(), lastError: null } });
+      logEvent("info", "forward.sent", { mailboxId: item.mailboxId, replyId: item.id });
+    } catch (error) {
+      const nextAttempts = item.attempts + 1;
+      const failed = nextAttempts >= item.maxAttempts;
+      const message = safeError(error, [password]);
+      await prisma.outboundReply.update({
+        where: { id: item.id },
+        data: {
+          attempts: nextAttempts,
+          status: failed ? "error" : "pending",
+          nextAttemptAt: failed ? null : backoffDate(nextAttempts),
+          lastError: message,
+        },
+      });
+      await bumpMetrics(item.mailboxId, item.mailbox.timezone, { smtpErrors: 1 });
+      logEvent("error", "forward.failed", { mailboxId: item.mailboxId, replyId: item.id, message });
+    }
+  }
 }
 
 function readyWhere(now: Date) {
@@ -122,8 +180,15 @@ function resolveWebhook(encrypted: string | null): string | null {
 }
 
 async function applyRetention() {
-  const config = await getIntegrationConfig();
-  if (!config.retentionDays || config.retentionDays < 1) return;
-  const cutoff = new Date(Date.now() - config.retentionDays * 24 * 60 * 60 * 1000);
-  await prisma.processedMessage.deleteMany({ where: { createdAt: { lt: cutoff } } });
+  const mailboxes = await prisma.mailbox.findMany({
+    where: { retentionDays: { gte: 1 } },
+    select: { id: true, retentionDays: true },
+  });
+  const now = Date.now();
+  for (const mailbox of mailboxes) {
+    const days = mailbox.retentionDays;
+    if (!days || days < 1) continue;
+    const cutoff = new Date(now - days * 24 * 60 * 60 * 1000);
+    await prisma.processedMessage.deleteMany({ where: { mailboxId: mailbox.id, createdAt: { lt: cutoff } } });
+  }
 }

@@ -1,6 +1,7 @@
 import type { WorkInterval, WorkSchedule } from "@/lib/hours/schedule";
 import type { OutsidePolicy } from "@/lib/hours/schedule";
 import { DEFAULT_NOTICE_FIELDS, NOTICE_FIELDS, sanitizeNoticeFields } from "@/lib/b24/notice";
+import { clampPreviewChars } from "@/lib/rules/preview-chars";
 import type { ConditionNode, Priority, RuleAction, RuleRecord } from "@/lib/rules/types";
 
 const PRIORITIES: Priority[] = ["low", "normal", "high", "critical"];
@@ -15,12 +16,12 @@ export function parseStoredRule(row: {
   conditions: unknown;
   action: unknown;
 }): RuleRecord | null {
-  if (row.type !== "exclude" && row.type !== "notify") return null;
+  if (row.type !== "notify") return null;
   if (!row.conditions || typeof row.conditions !== "object") return null;
   return {
     id: row.id,
     name: row.name,
-    type: row.type,
+    type: "notify",
     position: row.position,
     active: row.active,
     category: row.category,
@@ -45,6 +46,11 @@ export function normalizeAction(value: unknown): RuleAction {
     noticeGrouping: raw.noticeGrouping === "digest" ? "digest" : "each",
     noticeFields: resolveNoticeFields(raw),
     noticeMetaOptional: raw.noticeMetaOptional === true,
+    previewChars: clampPreviewChars(raw.previewChars),
+    forwardEnabled: raw.forwardEnabled === true,
+    forwardSource: raw.forwardSource === "employee" ? "employee" : "address",
+    forwardAddress: typeof raw.forwardAddress === "string" ? raw.forwardAddress.trim() : "",
+    forwardRecipientId: typeof raw.forwardRecipientId === "string" ? raw.forwardRecipientId : "",
   };
 }
 

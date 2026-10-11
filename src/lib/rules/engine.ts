@@ -1,12 +1,11 @@
 import type { NormalizedMessage } from "@/lib/mail/model";
 import { isGroup, type Condition, type ConditionNode, type RuleRecord } from "@/lib/rules/types";
 
-export function firstMatchingRule(rules: RuleRecord[], message: NormalizedMessage): RuleRecord | null {
-  const ordered = [...rules].filter((rule) => rule.active).sort((a, b) => a.position - b.position || a.name.localeCompare(b.name));
-  for (const rule of ordered) {
-    if (matches(rule.conditions, message)) return rule;
-  }
-  return null;
+export function matchingRules(rules: RuleRecord[], message: NormalizedMessage): RuleRecord[] {
+  return [...rules]
+    .filter((rule) => rule.active)
+    .sort((a, b) => a.position - b.position || a.name.localeCompare(b.name))
+    .filter((rule) => matches(rule.conditions, message));
 }
 
 export function matches(node: ConditionNode, message: NormalizedMessage): boolean {

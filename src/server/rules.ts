@@ -4,34 +4,41 @@ import { redirect } from "next/navigation";
 import { requireUser } from "@/lib/auth/session";
 import { prisma } from "@/lib/db";
 import { sanitizeNoticeFields } from "@/lib/b24/notice";
-import { normalizeAction, parsePolicy } from "@/lib/rules/parse";
-import type { ConditionGroup } from "@/lib/rules/types";
 import { withNotice } from "@/lib/http/notice";
+import { normalizeAction, parsePolicy } from "@/lib/rules/parse";
+import { clampPreviewChars } from "@/lib/rules/preview-chars";
+import type { ConditionGroup } from "@/lib/rules/types";
 
 export async function saveRule(formData: FormData) {
   await requireUser();
   const id = String(formData.get("id") || "");
   const mailboxId = String(formData.get("mailboxId") || "");
+  const existing = id ? await prisma.rule.findUnique({ where: { id } }) : null;
+  const previous = existing ? normalizeAction(existing.action) : null;
   const conditions = JSON.parse(String(formData.get("conditions") || "{\"op\":\"all\",\"conditions\":[]}")) as ConditionGroup;
   const recipientIds = formData.getAll("recipientIds").map(String);
   const action = normalizeAction({
-    notificationEnabled: formData.get("notificationEnabled") === "on",
+    ...(previous ?? {}),
+    notificationEnabled: previous ? previous.notificationEnabled : true,
     priority: String(formData.get("priority") || "normal"),
     responseHours: Number(formData.get("responseHours") || 24),
-    useExtractedDeadline: formData.get("useExtractedDeadline") === "on",
     recipientIds,
-    throttlingEnabled: formData.get("throttlingEnabled") === "on",
     notifyOutsidePolicy: parsePolicy(String(formData.get("notifyOutsidePolicy") || "defer")),
     noticeGrouping: formData.get("noticeGrouping") === "digest" ? "digest" : "each",
     noticeFields: sanitizeNoticeFields(formData.getAll("noticeFields")),
     noticeMetaOptional: true,
+    previewChars: clampPreviewChars(formData.get("previewChars")),
+    forwardEnabled: formData.get("forwardEnabled") === "1",
+    forwardSource: formData.get("forwardSource") === "employee" ? "employee" : "address",
+    forwardAddress: String(formData.get("forwardAddress") || "").trim(),
+    forwardRecipientId: String(formData.get("forwardRecipientId") || ""),
   });
   const data = {
     mailboxId,
     name: String(formData.get("name") || "").trim() || "Правило",
-    type: String(formData.get("type") || "notify") === "exclude" ? "exclude" : "notify",
-    position: Number(formData.get("position") || 100),
-    active: formData.get("active") === "on",
+    type: "notify",
+    position: existing?.position ?? (await nextPosition(mailboxId)),
+    active: existing?.active ?? true,
     category: String(formData.get("category") || "").trim() || null,
     conditions,
     action,
@@ -39,6 +46,23 @@ export async function saveRule(formData: FormData) {
   };
   const saved = id ? await prisma.rule.update({ where: { id }, data }) : await prisma.rule.create({ data });
   redirect(withNotice(`/rules/${saved.id}`, "Сохранено"));
+}
+
+export async function setRuleNotification(formData: FormData) {
+  await requireUser();
+  const id = String(formData.get("id") || "");
+  const enabled = formData.get("enabled") === "1";
+  const rule = id ? await prisma.rule.findUnique({ where: { id } }) : null;
+  const fallback = rule ? `/mailboxes#mailbox-${rule.mailboxId}` : "/mailboxes";
+  const returnTo = safeReturn(String(formData.get("returnTo") || ""), fallback);
+  if (!rule || rule.type !== "notify") redirect(noticeTo("/mailboxes", "Правило не найдено"));
+  const action = normalizeAction(rule.action);
+  action.notificationEnabled = enabled;
+  await prisma.rule.update({
+    where: { id },
+    data: { action, ...(enabled ? { active: true } : {}) },
+  });
+  redirect(noticeTo(returnTo, enabled ? "Уведомления правила включены" : "Уведомления правила выключены"));
 }
 
 export async function deleteRule(formData: FormData) {
@@ -69,7 +93,19 @@ export async function moveRule(formData: FormData) {
   redirect(returnTo);
 }
 
+async function nextPosition(mailboxId: string): Promise<number> {
+  const last = await prisma.rule.findFirst({ where: { mailboxId }, orderBy: { position: "desc" }, select: { position: true } });
+  return (last?.position ?? 0) + 10;
+}
+
 function safeReturn(value: string, fallback: string): string {
   if (!value.startsWith("/") || value.startsWith("//") || value.includes("\\")) return fallback;
   return value;
+}
+
+function noticeTo(pathWithHash: string, notice: string): string {
+  const hashAt = pathWithHash.indexOf("#");
+  const path = hashAt === -1 ? pathWithHash : pathWithHash.slice(0, hashAt);
+  const hash = hashAt === -1 ? "" : pathWithHash.slice(hashAt);
+  return `${withNotice(path, notice)}${hash}`;
 }

@@ -9,7 +9,7 @@ import { Notice, PageTitle } from "@/components/shell";
 import { prisma } from "@/lib/db";
 import { deleteMailbox } from "@/server/mailboxes";
 import { formatCountdown, nextConnectionAt } from "@/lib/mail/next-connection";
-import { parseSchedule } from "@/lib/rules/parse";
+import { normalizeAction, parseSchedule } from "@/lib/rules/parse";
 
 export default async function MailboxesPage({ searchParams }: { searchParams: Promise<{ notice?: string }> }) {
   const params = await searchParams;
@@ -18,8 +18,9 @@ export default async function MailboxesPage({ searchParams }: { searchParams: Pr
     include: {
       _count: { select: { messages: true } },
       rules: {
+        where: { type: "notify" },
         orderBy: { position: "asc" },
-        select: { id: true, name: true, type: true, position: true, active: true, category: true },
+        select: { id: true, name: true, active: true, category: true, action: true },
       },
     },
   });
@@ -27,7 +28,7 @@ export default async function MailboxesPage({ searchParams }: { searchParams: Pr
     <>
       <PageTitle
         title="Ящики"
-        text="Проверка почты и рабочие часы задаются под ящиком. Правила идут следом и проверяются сверху вниз."
+        text="Проверка почты и рабочие часы задаются под ящиком. У ящика может быть несколько правил, и каждое создаёт уведомление по своим условиям."
       />
       <Notice text={params.notice} />
       <Link className="button inline-block" href="/mailboxes/new">
@@ -41,7 +42,7 @@ export default async function MailboxesPage({ searchParams }: { searchParams: Pr
                 <Link className="text-lg font-semibold underline" href={`/mailboxes/${mailbox.id}`}>
                   {mailbox.name}
                 </Link>
-                <p className="mt-0.5 text-sm text-muted">
+                <p className="mt-0.5 break-words text-sm text-muted">
                   {mailbox.address}
                   {" · "}
                   писем {mailbox._count.messages}
@@ -72,7 +73,13 @@ export default async function MailboxesPage({ searchParams }: { searchParams: Pr
             />
             <MailboxRules
               mailboxId={mailbox.id}
-              rules={mailbox.rules}
+              rules={mailbox.rules.map((rule) => ({
+                id: rule.id,
+                name: rule.name,
+                active: rule.active,
+                category: rule.category,
+                notificationEnabled: normalizeAction(rule.action).notificationEnabled,
+              }))}
               returnTo={`/mailboxes#mailbox-${mailbox.id}`}
               panelId={`mailbox-${mailbox.id}`}
               divider

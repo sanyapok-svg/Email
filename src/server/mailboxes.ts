@@ -6,7 +6,6 @@ import { encryptSecret } from "@/lib/crypto/secrets";
 import { prisma } from "@/lib/db";
 import { testImapConnection, safeError } from "@/lib/imap/connector";
 import { pollMailbox } from "@/lib/orchestration/poll";
-import { starterRules } from "@/lib/rules/starter";
 import { withNotice } from "@/lib/http/notice";
 import { POLL_INTERVALS, pollIntervalMinutes } from "@/lib/mail/check-settings";
 
@@ -36,6 +35,7 @@ export async function saveMailbox(formData: FormData) {
     senderPauseMinutes: clamp(number(formData, "senderPauseMinutes", 60), 0, 10080),
     subjectPauseMinutes: clamp(number(formData, "subjectPauseMinutes", 0), 0, 10080),
     domainPauseMinutes: clamp(number(formData, "domainPauseMinutes", 0), 0, 10080),
+    retentionDays: optionalDays(formData, "retentionDays"),
   };
   const saved = existing
     ? await prisma.mailbox.update({ where: { id: existing.id }, data })
@@ -145,26 +145,6 @@ export async function deleteMailbox(formData: FormData) {
   redirect(withNotice("/mailboxes", "Ящик удалён"));
 }
 
-export async function installStarterRules(formData: FormData) {
-  await requireUser();
-  const mailboxId = String(formData.get("id") || "");
-  const count = await prisma.rule.count({ where: { mailboxId } });
-  await prisma.rule.createMany({
-    data: starterRules().map((rule, index) => ({
-      mailboxId,
-      name: rule.name,
-      type: rule.type,
-      position: count * 10 + rule.position + index,
-      active: rule.active,
-      category: rule.category,
-      conditions: rule.conditions,
-      action: rule.action,
-      dryRun: false,
-    })),
-  });
-  redirect(noticeTo(`/mailboxes#mailbox-${mailboxId}`, "Базовые исключения добавлены"));
-}
-
 function safeReturn(value: string, fallback: string): string {
   if (!value.startsWith("/") || value.startsWith("//") || value.includes("\\")) return fallback;
   return value;
@@ -196,6 +176,14 @@ function optional(formData: FormData, key: string): string | null {
 
 function chosenPollMinutes(minutes: number): number {
   return POLL_INTERVALS.some((item) => item.minutes === minutes) ? minutes : pollIntervalMinutes(minutes * 60);
+}
+
+function optionalDays(formData: FormData, key: string): number | null {
+  const raw = String(formData.get(key) || "").trim();
+  if (!raw) return null;
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value < 1) return null;
+  return clamp(value, 1, 3650);
 }
 
 function number(formData: FormData, key: string, fallback: number): number {

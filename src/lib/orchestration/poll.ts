@@ -5,15 +5,17 @@ import { prisma } from "@/lib/db";
 import { ImapConnector, safeError } from "@/lib/imap/connector";
 import { logEvent } from "@/lib/log";
 import { isConnectionDue } from "@/lib/mail/next-connection";
+import { forwardLetter, resolveForwardAddress, type ForwardEmployee } from "@/lib/mail/forward";
 import { buildNormalizedMessage, buildSearchDocument } from "@/lib/mail/pipeline";
 import type { NormalizedMessage } from "@/lib/mail/model";
 import { bumpMetrics } from "@/lib/metrics/counters";
 import { withLock } from "@/lib/locks";
-import { decideMessage, type DecideContext } from "@/lib/orchestration/decide";
+import { planMessage, type DecideContext } from "@/lib/orchestration/decide";
 import { DIGEST_PART, flushDigestParts, holdDigest } from "@/lib/orchestration/digest";
 import { dispatchQueues } from "@/lib/queues/dispatch";
-import { firstMatchingRule } from "@/lib/rules/engine";
+import { matchingRules } from "@/lib/rules/engine";
 import { parsePolicy, parseSchedule, parseStoredRule } from "@/lib/rules/parse";
+import type { RuleRecord } from "@/lib/rules/types";
 import { getIntegrationConfig } from "@/lib/settings";
 
 const REAL_NOTICE = ["pending", "scheduled", "sending", "sent"];
@@ -174,83 +176,136 @@ async function persistMessage(mailbox: Mailbox, uid: bigint, uidValidity: bigint
     const parsed = parseStoredRule(row);
     return parsed ? [parsed] : [];
   });
-  const matched = firstMatchingRule(rules, message);
-  const ctx = await decideContext(mailbox, message, uid, config, matched?.id ?? null);
-  const decision = decideMessage(message, rules, ctx);
-  const maxAttempts = config.notifyMaxAttempts;
-  const held = Boolean(decision.notification && decision.rule?.action.noticeGrouping === "digest");
-
-  await prisma.$transaction(async (tx) => {
-    const saved = await tx.processedMessage.create({
-      data: messageData(mailbox.id, uid, uidValidity, message, decision.decision, decision.rule?.id ?? null),
-    });
-    if (decision.notification) {
-      const duplicate = await tx.notification.findUnique({ where: { idempotencyKey: decision.notification.idempotencyKey } });
-      if (!duplicate) await tx.notification.create({
-        data: {
-          mailboxId: mailbox.id,
-          messageId: saved.id,
-          ruleId: decision.rule?.id,
-          idempotencyKey: decision.notification.idempotencyKey,
-          status: held ? DIGEST_PART : decision.notification.status,
-          priority: decision.notification.priority,
-          category: decision.notification.category,
-          responseDueAt: decision.notification.responseDueAt,
-          overdue: decision.notification.overdue,
-          dueRisk: decision.notification.dueRisk,
-          payload: (held ? holdDigest(decision.notification, pollToken) : decision.notification.payload) as Prisma.InputJsonValue,
-          scheduledAt: decision.notification.scheduledAt,
-          maxAttempts,
-        },
-      });
-    }
-    await tx.mailbox.update({ where: { id: mailbox.id }, data: { lastUid: uid } });
-  });
-
-  const noticeStatus = held ? DIGEST_PART : decision.notification?.status;
-  await bumpMetrics(mailbox.id, mailbox.timezone, metricDelta(message, decision.decision, noticeStatus, elapsedMs));
-  logEvent("info", "mail.processed", {
-    mailboxId: mailbox.id,
-    uid: uid.toString(),
-    ruleId: decision.rule?.id ?? null,
-    decision: decision.decision,
-    ms: elapsedMs,
-  });
-}
-
-async function decideContext(
-  mailbox: Mailbox,
-  message: NormalizedMessage,
-  uid: bigint,
-  config: Awaited<ReturnType<typeof getIntegrationConfig>>,
-  ruleId: string | null,
-): Promise<DecideContext> {
-  const hourAgo = new Date(Date.now() - 60 * 60 * 1000);
-  const [ruleNotificationsLastHour, senderPaused, subjectPaused, domainPaused] = await Promise.all([
-    prisma.notification.count({
-      where: { ruleId: ruleId ?? "none", createdAt: { gte: hourAgo }, status: { in: REAL_NOTICE } },
-    }),
-    paused(mailbox.senderPauseMinutes, { mailboxId: mailbox.id, message: { fromEmail: message.fromEmail } }),
-    paused(mailbox.subjectPauseMinutes, { mailboxId: mailbox.id, message: { subjectNormalized: message.subjectNormalized } }),
-    paused(mailbox.domainPauseMinutes, { mailboxId: mailbox.id, message: { fromDomain: message.fromDomain } }),
-  ]);
-  return {
+  const matched = matchingRules(rules, message);
+  const notifyIds = matched.filter((rule) => rule.action.notificationEnabled).map((rule) => rule.id);
+  const [pauses, counts] = await Promise.all([pauseFlags(mailbox, message), notificationsLastHour(notifyIds)]);
+  const ctx: DecideContext = {
     now: new Date(),
     mailboxId: mailbox.id,
     mailboxName: mailbox.name,
     uid: uid.toString(),
     schedule: parseSchedule(mailbox),
     notifyOutsidePolicy: parsePolicy(mailbox.notifyOutsidePolicy),
-    throttle: {
-      ruleNotificationsLastHour,
-      notifyPerHour: mailbox.notifyPerHour,
-      senderPaused,
-      subjectPaused,
-      domainPaused,
-    },
-    previewChars: config.previewChars,
+    throttle: { ...pauses, ruleNotificationsLastHour: 0 },
     globalMessageDedupe: config.globalMessageDedupe,
   };
+  const plan = planMessage(message, rules, ctx, (ruleId) => ({
+    ...pauses,
+    ruleNotificationsLastHour: counts.get(ruleId) ?? 0,
+  }));
+  const forwards = await plannedForwards(matched);
+  const letter = forwardLetter(message);
+  const maxAttempts = config.notifyMaxAttempts;
+
+  await prisma.$transaction(async (tx) => {
+    const saved = await tx.processedMessage.create({
+      data: messageData(mailbox.id, uid, uidValidity, message, plan.decision, plan.rule?.id ?? null),
+    });
+    for (const item of plan.notifications) {
+      const held = item.rule.action.noticeGrouping === "digest";
+      const duplicate = await tx.notification.findUnique({ where: { idempotencyKey: item.notification.idempotencyKey } });
+      if (duplicate) continue;
+      await tx.notification.create({
+        data: {
+          mailboxId: mailbox.id,
+          messageId: saved.id,
+          ruleId: item.rule.id,
+          idempotencyKey: item.notification.idempotencyKey,
+          status: held ? DIGEST_PART : item.notification.status,
+          priority: item.notification.priority,
+          category: item.notification.category,
+          responseDueAt: item.notification.responseDueAt,
+          overdue: item.notification.overdue,
+          dueRisk: item.notification.dueRisk,
+          payload: (held ? holdDigest(item.notification, pollToken) : item.notification.payload) as Prisma.InputJsonValue,
+          scheduledAt: item.notification.scheduledAt,
+          maxAttempts,
+        },
+      });
+    }
+    for (const item of forwards) {
+      const idempotencyKey = `forward:${mailbox.id}:${uid.toString()}:${item.rule.id}`;
+      const duplicate = await tx.outboundReply.findUnique({ where: { idempotencyKey } });
+      if (duplicate) continue;
+      await tx.outboundReply.create({
+        data: {
+          mailboxId: mailbox.id,
+          messageId: saved.id,
+          ruleId: item.rule.id,
+          kind: "forward",
+          idempotencyKey,
+          status: "pending",
+          toAddress: item.to,
+          subject: letter.subject,
+          bodyText: letter.text,
+          maxAttempts: config.replyMaxAttempts,
+        },
+      });
+    }
+    await tx.mailbox.update({ where: { id: mailbox.id }, data: { lastUid: uid } });
+  });
+
+  await bumpMetrics(mailbox.id, mailbox.timezone, metricDelta(message, plan, elapsedMs));
+  logEvent("info", "mail.processed", {
+    mailboxId: mailbox.id,
+    uid: uid.toString(),
+    ruleId: plan.rule?.id ?? null,
+    ruleIds: plan.notifications.map((item) => item.rule.id).join(",") || null,
+    decision: plan.decision,
+    ms: elapsedMs,
+  });
+}
+
+async function plannedForwards(rules: RuleRecord[]): Promise<Array<{ rule: RuleRecord; to: string }>> {
+  const wanted = rules.filter((rule) => rule.action.forwardEnabled);
+  if (!wanted.length) return [];
+  const ids = [...new Set(wanted.map((rule) => rule.action.forwardRecipientId).filter(Boolean))];
+  const people = ids.length
+    ? await prisma.b24Recipient.findMany({ where: { id: { in: ids } }, select: { id: true, login: true, active: true, dismissed: true } })
+    : [];
+  const byId = new Map<string, ForwardEmployee>(people.map((person) => [person.id, person]));
+  const planned: Array<{ rule: RuleRecord; to: string }> = [];
+  for (const rule of wanted) {
+    const to = resolveForwardAddress(rule.action, byId.get(rule.action.forwardRecipientId) ?? null);
+    if (!to) {
+      logEvent("warn", "forward.no_address", { ruleId: rule.id });
+      continue;
+    }
+    planned.push({ rule, to });
+  }
+  return planned;
+}
+
+async function pauseFlags(
+  mailbox: Mailbox,
+  message: NormalizedMessage,
+): Promise<Omit<DecideContext["throttle"], "ruleNotificationsLastHour">> {
+  const [senderPaused, subjectPaused, domainPaused] = await Promise.all([
+    paused(mailbox.senderPauseMinutes, { mailboxId: mailbox.id, message: { fromEmail: message.fromEmail } }),
+    paused(mailbox.subjectPauseMinutes, { mailboxId: mailbox.id, message: { subjectNormalized: message.subjectNormalized } }),
+    paused(mailbox.domainPauseMinutes, { mailboxId: mailbox.id, message: { fromDomain: message.fromDomain } }),
+  ]);
+  return {
+    notifyPerHour: mailbox.notifyPerHour,
+    senderPaused,
+    subjectPaused,
+    domainPaused,
+  };
+}
+
+async function notificationsLastHour(ruleIds: string[]): Promise<Map<string, number>> {
+  const counts = new Map<string, number>();
+  if (ruleIds.length === 0) return counts;
+  const hourAgo = new Date(Date.now() - 60 * 60 * 1000);
+  const grouped = await prisma.notification.groupBy({
+    by: ["ruleId"],
+    where: { ruleId: { in: ruleIds }, createdAt: { gte: hourAgo }, status: { in: REAL_NOTICE } },
+    _count: { _all: true },
+  });
+  for (const row of grouped) {
+    if (row.ruleId) counts.set(row.ruleId, row._count._all);
+  }
+  return counts;
 }
 
 async function paused(minutes: number, where: Prisma.NotificationWhereInput): Promise<boolean> {
@@ -328,7 +383,16 @@ function messageData(
   };
 }
 
-function metricDelta(message: NormalizedMessage, decision: string, noticeStatus?: string, elapsedMs = 0) {
+function metricDelta(message: NormalizedMessage, plan: { decision: string; notifications: Array<{ rule: { action: { noticeGrouping: string } }; notification: { status: string } }> }, elapsedMs = 0) {
+  let notified = 0;
+  let throttledNotifications = 0;
+  let deferredNotifications = 0;
+  for (const item of plan.notifications) {
+    const status = item.rule.action.noticeGrouping === "digest" ? DIGEST_PART : item.notification.status;
+    if (status === "pending" || status === "scheduled") notified += 1;
+    if (status === "throttled") throttledNotifications += 1;
+    if (status === "scheduled") deferredNotifications += 1;
+  }
   return {
     received: 1,
     parsed: message.bodyError === "encrypted" ? 0 : 1,
@@ -340,11 +404,11 @@ function metricDelta(message: NormalizedMessage, decision: string, noticeStatus?
     amounts: message.amounts.length,
     contracts: message.contractNumbers.length,
     deadlines: message.deadlines.length,
-    excluded: decision === "exclude" ? 1 : 0,
-    skipped: decision === "skipped_no_rule" ? 1 : 0,
-    notified: noticeStatus === "pending" || noticeStatus === "scheduled" ? 1 : 0,
-    throttledNotifications: noticeStatus === "throttled" ? 1 : 0,
-    deferredNotifications: noticeStatus === "scheduled" ? 1 : 0,
+    excluded: plan.decision === "exclude" ? 1 : 0,
+    skipped: plan.decision === "skipped_no_rule" ? 1 : 0,
+    notified,
+    throttledNotifications,
+    deferredNotifications,
     processingMs: elapsedMs,
     languages: { [message.language]: 1 },
     sentiments: { [message.sentiment]: 1 },

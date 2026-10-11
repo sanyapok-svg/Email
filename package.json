@@ -23,6 +23,7 @@
     "luxon": "^3.7.2",
     "mailparser": "^3.9.0",
     "next": "^15.5.4",
+    "nodemailer": "^10.1.0",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
     "workflow": "^5.0.1",

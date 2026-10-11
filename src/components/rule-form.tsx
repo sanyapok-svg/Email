@@ -4,7 +4,9 @@ import Link from "next/link";
 import { useState } from "react";
 import { B24NoticePreview, type NoticeRecipient } from "@/components/b24-notice-preview";
 import { DEFAULT_NOTICE_FIELDS, NOTICE_FIELDS } from "@/lib/b24/notice";
+import { isEmail } from "@/lib/mail/forward";
 import { OPERATORS, RULE_FIELDS } from "@/lib/rules/fields";
+import { PREVIEW_CHARS_DEFAULT, PREVIEW_CHARS_MAX, PREVIEW_CHARS_MIN, clampPreviewChars } from "@/lib/rules/preview-chars";
 import { saveRule, deleteRule } from "@/server/rules";
 import { ConfirmDelete } from "@/components/confirm-delete";
 
@@ -24,21 +26,21 @@ export function RuleForm({
     id: string;
     mailboxId: string;
     name: string;
-    type: string;
-    position: number;
-    active: boolean;
+    notifies: boolean;
     category: string | null;
     op: "all" | "any" | "none";
     conditions: ConditionRow[];
-    notificationEnabled: boolean;
     priority: string;
     responseHours: number;
-    useExtractedDeadline: boolean;
+    previewChars: number;
     recipientIds: string[];
-    throttlingEnabled: boolean;
     notifyOutsidePolicy: string;
     noticeGrouping: "each" | "digest";
     noticeFields: string[];
+    forwardEnabled: boolean;
+    forwardSource: "address" | "employee";
+    forwardAddress: string;
+    forwardRecipientId: string;
   };
   defaults?: {
     notifyOutsidePolicy?: string;
@@ -47,16 +49,19 @@ export function RuleForm({
   const [op, setOp] = useState<"all" | "any" | "none">(initial?.op || "all");
   const [rows, setRows] = useState<ConditionRow[]>(initial?.conditions.length ? initial.conditions : [{ field: "subject", operator: "contains", value: "" }]);
   const selectedMailbox = initial?.mailboxId || mailboxId || mailboxes[0]?.id || "";
-  const [ruleType, setRuleType] = useState(initial?.type || "notify");
   const [priority, setPriority] = useState(initial?.priority || "normal");
   const [category, setCategory] = useState(initial?.category || "");
   const [responseHours, setResponseHours] = useState(initial?.responseHours || 24);
-  const [notifyOn, setNotifyOn] = useState(initial?.notificationEnabled ?? true);
+  const [previewChars, setPreviewChars] = useState(initial?.previewChars || PREVIEW_CHARS_DEFAULT);
   const [picked, setPicked] = useState<string[]>(initial?.recipientIds || []);
   const [outsidePolicy, setOutsidePolicy] = useState(initial?.notifyOutsidePolicy || defaults?.notifyOutsidePolicy || "defer");
   const [noticeGrouping, setNoticeGrouping] = useState<"each" | "digest">(initial?.noticeGrouping || "each");
   const [noticeFields, setNoticeFields] = useState<string[]>(initial ? initial.noticeFields : [...DEFAULT_NOTICE_FIELDS]);
-  const conditions = JSON.stringify({ op, conditions: rows.map((row) => ({ ...row, value: row.value })) });
+  const [forwardOn, setForwardOn] = useState(initial?.forwardEnabled ?? false);
+  const [forwardSource, setForwardSource] = useState<"address" | "employee">(initial?.forwardSource || "address");
+  const [forwardAddress, setForwardAddress] = useState(initial?.forwardAddress || "");
+  const [forwardRecipientId, setForwardRecipientId] = useState(initial?.forwardRecipientId || "");
+  const conditions = JSON.stringify({ op, conditions: rows });
   const mailboxName = mailboxes.find((item) => item.id === selectedMailbox)?.name || "";
   const chosen = recipients.filter((item) => picked.includes(item.id));
   const listed = recipients.filter((item) => (item.active && !item.dismissed) || picked.includes(item.id));
@@ -79,19 +84,11 @@ export function RuleForm({
             <input className="mt-1" name="name" defaultValue={initial?.name || ""} required />
           </label>
           <label className="text-sm">
-            Тип
-            <select className="mt-1" name="type" value={ruleType} onChange={(event) => setRuleType(event.target.value)}>
-              <option value="exclude">Исключение</option>
-              <option value="notify">Уведомление</option>
-            </select>
-          </label>
-          <label className="text-sm">
-            Позиция
-            <input className="mt-1" name="position" type="number" defaultValue={initial?.position || 100} />
-          </label>
-          <label className="text-sm">
             Категория
-            <input className="mt-1" name="category" value={category} onChange={(event) => setCategory(event.target.value)} />
+            <input className="mt-1" name="category" value={category} onChange={(event) => setCategory(event.target.value)} placeholder="договоры" />
+            <span className="mt-1 block text-xs text-muted">
+              Своя подпись правила. Она видна под названием, попадает в уведомление строкой «Категория: …» и помогает найти его фильтром. На получателей и на срабатывание правила не влияет.
+            </span>
           </label>
           <label className="text-sm">
             Приоритет
@@ -103,8 +100,11 @@ export function RuleForm({
             </select>
           </label>
           <label className="text-sm">
-            Срок ответа, часы
-            <input className="mt-1" name="responseHours" type="number" value={responseHours} onChange={(event) => setResponseHours(Number(event.target.value))} />
+            Ответить на письмо до
+            <input className="mt-1" name="responseHours" type="number" min={1} value={responseHours} onChange={(event) => setResponseHours(Number(event.target.value))} />
+            <span className="mt-1 block text-xs text-muted">
+              Число — обычные часы с момента проверки, не рабочие. 24 значит сутки. В уведомлении появится дата «Ответить до». Если отправка отложена до следующего рабочего окна, а срок к тому времени уже пройдёт, у уведомления будет пометка «риск». Если раньше у правила был включён срок из текста письма, вместо часов берётся дата из письма.
+            </span>
           </label>
         </div>
         <label className="text-sm">
@@ -117,7 +117,7 @@ export function RuleForm({
         </label>
         <div className="grid gap-2">
           {rows.map((row, index) => (
-            <div key={index} className="grid gap-2 md:grid-cols-[1.2fr_1fr_1.2fr_auto]">
+            <div key={index} className="grid gap-2 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,1.2fr)_auto]">
               <select value={row.field} onChange={(event) => update(index, { field: event.target.value })}>
                 {RULE_FIELDS.map((field) => (
                   <option key={field.id} value={field.id}>
@@ -142,6 +142,17 @@ export function RuleForm({
             Добавить условие
           </button>
         </div>
+        <ForwardMail
+          enabled={forwardOn}
+          source={forwardSource}
+          address={forwardAddress}
+          recipientId={forwardRecipientId}
+          recipients={recipients}
+          onEnabled={setForwardOn}
+          onSource={setForwardSource}
+          onAddress={setForwardAddress}
+          onRecipient={setForwardRecipientId}
+        />
         <div className="grid items-start gap-4 lg:grid-cols-2">
           <section className="grid min-w-0 content-start gap-2 rounded-xl border border-line bg-card p-4">
             <h2 className="font-semibold">Получатели в Битрикс24</h2>
@@ -175,16 +186,7 @@ export function RuleForm({
                 ))}
               </div>
             )}
-            {ruleType === "exclude" ? (
-              <>
-                <input type="hidden" name="notifyOutsidePolicy" value={outsidePolicy} />
-                <input type="hidden" name="noticeGrouping" value={noticeGrouping} />
-                {noticeFields.map((id) => (
-                  <input key={id} type="hidden" name="noticeFields" value={id} />
-                ))}
-              </>
-            ) : (
-              <div className="mt-3 grid gap-3 border-t border-line pt-3">
+            <div className="mt-3 grid gap-3 border-t border-line pt-3">
                 <label className="text-sm">
                   Уведомления вне рабочих часов
                   <select className="mt-1" name="notifyOutsidePolicy" value={outsidePolicy} onChange={(event) => setOutsidePolicy(event.target.value)}>
@@ -210,6 +212,19 @@ export function RuleForm({
                     ? "За одну проверку уходит одно сообщение всем выбранным сотрудникам. В нём каждое письмо расписано отдельно."
                     : "За одну проверку каждое подходящее письмо уходит отдельным сообщением всем выбранным сотрудникам."}
                 </p>
+                <label className="text-sm">
+                  Символов превью
+                  <input
+                    className="mt-1"
+                    name="previewChars"
+                    type="number"
+                    min={PREVIEW_CHARS_MIN}
+                    max={PREVIEW_CHARS_MAX}
+                    value={Number.isFinite(previewChars) ? previewChars : ""}
+                    onChange={(event) => setPreviewChars(event.target.value === "" ? Number.NaN : Number(event.target.value))}
+                  />
+                </label>
+                <p className="text-sm text-muted">Сколько символов текста письма попадёт в уведомление, если отмечено поле «текст». От {PREVIEW_CHARS_MIN} до {PREVIEW_CHARS_MAX}.</p>
                 <div className="text-sm">
                   Что передать из письма
                   <div className="mt-1 grid gap-1 sm:grid-cols-2">
@@ -232,24 +247,18 @@ export function RuleForm({
                   ))}
                 </div>
               </div>
-            )}
           </section>
           <B24NoticePreview
-            enabled={ruleType !== "exclude" && notifyOn}
+            enabled={initial?.notifies ?? true}
             mailboxName={mailboxName}
             priority={priority}
             category={category}
             responseHours={responseHours}
+            previewChars={clampPreviewChars(previewChars)}
             recipients={chosen}
             grouping={noticeGrouping}
             fields={noticeFields}
           />
-        </div>
-        <div className="grid gap-2 md:grid-cols-2">
-          <Check name="active" label="Правило активно" defaultChecked={initial?.active ?? true} />
-          <Check name="notificationEnabled" label="Создавать уведомление" defaultChecked={initial?.notificationEnabled ?? true} onChange={setNotifyOn} />
-          <Check name="useExtractedDeadline" label="Срок из дедлайна письма" defaultChecked={initial?.useExtractedDeadline} />
-          <Check name="throttlingEnabled" label="Троттлинг" defaultChecked={initial?.throttlingEnabled ?? true} />
         </div>
         <button type="submit">Сохранить правило</button>
       </form>
@@ -270,27 +279,84 @@ export function RuleForm({
   }
 }
 
-function Check({
-  name,
-  label,
-  defaultChecked,
-  onChange,
+function ForwardMail({
+  enabled,
+  source,
+  address,
+  recipientId,
+  recipients,
+  onEnabled,
+  onSource,
+  onAddress,
+  onRecipient,
 }: {
-  name: string;
-  label: string;
-  defaultChecked?: boolean;
-  onChange?: (checked: boolean) => void;
+  enabled: boolean;
+  source: "address" | "employee";
+  address: string;
+  recipientId: string;
+  recipients: Array<NoticeRecipient & { active: boolean; dismissed?: boolean }>;
+  onEnabled: (value: boolean) => void;
+  onSource: (value: "address" | "employee") => void;
+  onAddress: (value: string) => void;
+  onRecipient: (value: string) => void;
 }) {
+  const people = recipients.filter((item) => isEmail(item.login) && ((item.active && !item.dismissed) || item.id === recipientId));
   return (
-    <label className="flex items-center gap-2 text-sm">
-      <input
-        style={{ width: "auto" }}
-        type="checkbox"
-        name={name}
-        defaultChecked={defaultChecked}
-        onChange={onChange ? (event) => onChange(event.target.checked) : undefined}
-      />
-      {label}
-    </label>
+    <section className="grid gap-3 rounded-xl border border-line bg-card p-4">
+      <h2 className="font-semibold">Пересылка</h2>
+      <input type="hidden" name="forwardEnabled" value={enabled ? "1" : "0"} />
+      <input type="hidden" name="forwardSource" value={source} />
+      <label className="flex items-center gap-2 text-sm">
+        <input style={{ width: "auto" }} type="checkbox" checked={enabled} onChange={(event) => onEnabled(event.target.checked)} />
+        Пересылать подходящие письма
+      </label>
+      <p className="text-sm text-muted">
+        Если условия правила выполнены, каждое такое письмо дополнительно уходит на выбранный адрес. Это не зависит от переключателя уведомления. В письме будут текст и имена вложений, сами файлы не прикладываются.
+      </p>
+      {enabled ? (
+        <div className="grid gap-3">
+          <div className="flex flex-wrap gap-4 text-sm">
+            <label className="flex items-center gap-2">
+              <input style={{ width: "auto" }} type="radio" checked={source === "address"} onChange={() => onSource("address")} />
+              Свой адрес
+            </label>
+            <label className="flex items-center gap-2">
+              <input style={{ width: "auto" }} type="radio" checked={source === "employee"} onChange={() => onSource("employee")} />
+              Сотрудник Б24
+            </label>
+          </div>
+          {source === "address" ? (
+            <>
+              <label className="text-sm">
+                Адрес
+                <input className="mt-1" name="forwardAddress" type="email" value={address} onChange={(event) => onAddress(event.target.value)} placeholder="name@example.com" />
+              </label>
+              <input type="hidden" name="forwardRecipientId" value={recipientId} />
+            </>
+          ) : (
+            <>
+              <label className="text-sm">
+                Сотрудник
+                <select className="mt-1" name="forwardRecipientId" value={recipientId} onChange={(event) => onRecipient(event.target.value)}>
+                  <option value="">Выберите сотрудника</option>
+                  {people.map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {item.name} · {item.login}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {people.length === 0 ? <p className="text-sm text-muted">У сотрудников Б24 пока нет адресов почты.</p> : null}
+              <input type="hidden" name="forwardAddress" value={address} />
+            </>
+          )}
+        </div>
+      ) : (
+        <>
+          <input type="hidden" name="forwardAddress" value={address} />
+          <input type="hidden" name="forwardRecipientId" value={recipientId} />
+        </>
+      )}
+    </section>
   );
 }

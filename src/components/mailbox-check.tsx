@@ -74,7 +74,7 @@ export function MailboxCheck({
           <input type="hidden" name="returnTo" value={returnTo} />
           <p className="text-sm text-muted">
             {settings.autoPoll
-              ? "Автопроверка включена: почта читается по этим параметрам. Уведомления задаются в правиле ящика."
+              ? "Автопроверка включена: почта читается по этим параметрам. Уведомления задаются в правилах ящика."
               : "Автопроверка выключена. Параметры сохранены, почта сама не читается."}
           </p>
           <div className="grid gap-3 md:grid-cols-2">

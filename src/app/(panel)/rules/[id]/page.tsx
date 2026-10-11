@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import { RuleForm } from "@/components/rule-form";
+import { RuleNotifySwitch } from "@/components/rule-notify-switch";
 import { Notice, PageTitle } from "@/components/shell";
 import { prisma } from "@/lib/db";
 import type { Condition, ConditionGroup } from "@/lib/rules/types";
@@ -10,7 +11,7 @@ export default async function RulePage({ params, searchParams }: { params: Promi
   const { id } = await params;
   const query = await searchParams;
   const rule = await prisma.rule.findUnique({ where: { id } });
-  if (!rule) notFound();
+  if (!rule || rule.type !== "notify") notFound();
   const [mailboxes, recipients, mailbox] = await Promise.all([
     prisma.mailbox.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true } }),
     prisma.b24Recipient.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true, login: true, externalId: true, active: true, dismissed: true } }),
@@ -27,6 +28,9 @@ export default async function RulePage({ params, searchParams }: { params: Promi
         back={{ href: `/mailboxes#mailbox-${rule.mailboxId}`, label: "К правилам ящика" }}
       />
       <Notice text={query.notice} />
+      <div className="mb-4">
+        <RuleNotifySwitch id={rule.id} enabled={rule.active && action.notificationEnabled} returnTo={`/rules/${rule.id}`} />
+      </div>
       <RuleForm
         mailboxes={mailboxes}
         recipients={recipients}
@@ -34,9 +38,7 @@ export default async function RulePage({ params, searchParams }: { params: Promi
           id: rule.id,
           mailboxId: rule.mailboxId,
           name: rule.name,
-          type: rule.type,
-          position: rule.position,
-          active: rule.active,
+          notifies: rule.active && action.notificationEnabled,
           category: rule.category,
           op: group.op,
           conditions: group.conditions.filter((item): item is Condition => !isGroup(item)).map((item) => ({
@@ -44,15 +46,17 @@ export default async function RulePage({ params, searchParams }: { params: Promi
             operator: item.operator,
             value: Array.isArray(item.value) ? item.value.join(", ") : String(item.value ?? ""),
           })),
-          notificationEnabled: action.notificationEnabled,
           priority: action.priority,
           responseHours: action.responseHours,
-          useExtractedDeadline: action.useExtractedDeadline,
+          previewChars: action.previewChars,
           recipientIds: action.recipientIds,
-          throttlingEnabled: action.throttlingEnabled,
           notifyOutsidePolicy: readNotifyPolicy(rule.action) ?? parsePolicy(mailbox?.notifyOutsidePolicy || "defer"),
           noticeGrouping: action.noticeGrouping,
           noticeFields: action.noticeFields,
+          forwardEnabled: action.forwardEnabled,
+          forwardSource: action.forwardSource,
+          forwardAddress: action.forwardAddress,
+          forwardRecipientId: action.forwardRecipientId,
         }}
       />
     </>

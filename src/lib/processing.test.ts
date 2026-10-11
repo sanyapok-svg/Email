@@ -10,9 +10,8 @@ import { emptyMessage } from "@/lib/mail/model";
 import { buildNormalizedMessage } from "@/lib/mail/pipeline";
 import { classifyStructure } from "@/lib/mail/structure";
 import { formatBitrixDigest } from "@/lib/b24/notice";
-import { decideMessage } from "@/lib/orchestration/decide";
+import { decideMessage, planMessage } from "@/lib/orchestration/decide";
 import { combineDigest } from "@/lib/orchestration/digest";
-import { firstMatchingRule } from "@/lib/rules/engine";
 import type { RuleRecord } from "@/lib/rules/types";
 import { htmlToText, splitQuotedText } from "@/lib/text/extract";
 import iconv from "iconv-lite";
@@ -96,14 +95,54 @@ describe("analysis", () => {
 });
 
 describe("rules", () => {
-  it("stops at the first matching rule", () => {
+  it("notifies every matching rule", () => {
     const message = emptyMessage(receivedAt);
     message.subject = "Договор на подпись";
     message.bodyNewText = "Просим подписать";
-    message.attachmentExtensions = ["pdf"];
-    const exclude = rule("exclude", 1, { op: "all", conditions: [{ field: "subject", operator: "contains", value: "договор" }] });
-    const notify = rule("notify", 2, { op: "all", conditions: [{ field: "body_new_text", operator: "contains", value: "подписать" }] });
-    expect(firstMatchingRule([notify, exclude], message)?.id).toBe("exclude");
+    const legal = rule("legal", 2, { op: "all", conditions: [{ field: "subject", operator: "contains", value: "договор" }] });
+    const sign = rule("sign", 1, { op: "all", conditions: [{ field: "body_new_text", operator: "contains", value: "подписать" }] });
+    const plan = planMessage(message, [legal, sign], context());
+    expect(plan.decision).toBe("notify");
+    expect(plan.notifications.map((item) => item.rule.id)).toEqual(["sign", "legal"]);
+  });
+
+  it("leaves other rules alone when one rule has notifications turned off", () => {
+    const message = emptyMessage(receivedAt);
+    message.subject = "Оплата";
+    const off = rule("off", 1, { op: "all", conditions: [{ field: "subject", operator: "contains", value: "оплата" }] });
+    const on = rule("on", 2, { op: "all", conditions: [{ field: "subject", operator: "contains", value: "оплата" }] });
+    off.action.notificationEnabled = false;
+    const plan = planMessage(message, [off, on], context());
+    expect(plan.decision).toBe("notify");
+    expect(plan.notifications.map((item) => item.rule.id)).toEqual(["on"]);
+  });
+
+  it("throttles each rule by its own counter", () => {
+    const message = emptyMessage(receivedAt);
+    message.subject = "Оплата";
+    const legal = rule("legal", 1, { op: "all", conditions: [{ field: "subject", operator: "contains", value: "оплата" }] });
+    const sign = rule("sign", 2, { op: "all", conditions: [{ field: "subject", operator: "contains", value: "оплата" }] });
+    const shared = context().throttle;
+    const plan = planMessage(message, [legal, sign], context(), (ruleId) => ({
+      ...shared,
+      ruleNotificationsLastHour: ruleId === "legal" ? 10 : 0,
+    }));
+    expect(plan.notifications.find((item) => item.rule.id === "legal")?.notification.status).toBe("throttled");
+    expect(plan.notifications.find((item) => item.rule.id === "sign")?.notification.status).not.toBe("throttled");
+  });
+
+  it("cuts the notice text to the length set on the rule", () => {
+    const message = emptyMessage(receivedAt);
+    message.subject = "Оплата";
+    message.bodyNewText = "Просим оплатить счёт до конца недели и прислать платёжку.";
+    const matched = rule("pay", 1, { op: "all", conditions: [{ field: "subject", operator: "contains", value: "оплата" }] });
+    matched.action.previewChars = 40;
+    matched.action.noticeFields = ["text"];
+    const decision = decideMessage(message, [matched], context());
+    const letter = decision.notification?.payload.letter as { text?: string };
+    expect(letter.text).toBe("Просим оплатить счёт до конца недели и п");
+    expect(String(decision.notification?.payload.text)).toContain("Просим оплатить счёт до конца недели и п");
+    expect(String(decision.notification?.payload.text)).not.toContain("платёжку");
   });
 
   it("builds one notification", () => {
@@ -244,7 +283,7 @@ function rule(id: string, position: number, conditions: RuleRecord["conditions"]
   return {
     id,
     name: id,
-    type: id === "exclude" ? "exclude" : "notify",
+    type: "notify",
     position,
     active: true,
     category: "legal",
@@ -258,6 +297,11 @@ function rule(id: string, position: number, conditions: RuleRecord["conditions"]
       throttlingEnabled: true,
       noticeGrouping: "each",
       noticeFields: ["subject", "from"],
+      previewChars: 280,
+      forwardEnabled: false,
+      forwardSource: "address",
+      forwardAddress: "",
+      forwardRecipientId: "",
     },
   };
 }
@@ -291,7 +335,6 @@ function context() {
       subjectPaused: false,
       domainPaused: false,
     },
-    previewChars: 200,
     globalMessageDedupe: false,
   };
 }

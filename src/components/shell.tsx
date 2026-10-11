@@ -38,7 +38,7 @@ export function PageTitle({ title, text, back }: { title: string; text?: string;
         </Link>
       ) : null}
       <h1 className="break-words text-xl font-semibold sm:text-2xl">{title}</h1>
-      {text ? <p className="mt-1 max-w-3xl text-sm text-muted">{text}</p> : null}
+      {text ? <p className="mt-1 max-w-3xl break-words text-sm text-muted">{text}</p> : null}
     </header>
   );
 }

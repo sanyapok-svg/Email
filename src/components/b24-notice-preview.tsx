@@ -1,4 +1,5 @@
 import { EXAMPLE_FROM, EXAMPLE_SUBJECT, formatBitrixDigest, formatBitrixNotice, priorityLabel, type NoticeLetter } from "@/lib/b24/notice";
+import { clampPreviewChars } from "@/lib/rules/preview-chars";
 
 export type NoticeRecipient = {
   id: string;
@@ -20,6 +21,7 @@ export function B24NoticePreview({
   priority,
   category,
   responseHours,
+  previewChars = 280,
   recipients,
   grouping = "each",
   fields,
@@ -29,14 +31,16 @@ export function B24NoticePreview({
   priority: string;
   category: string;
   responseHours: number;
+  previewChars?: number;
   recipients: NoticeRecipient[];
   grouping?: "each" | "digest";
   fields: readonly string[];
 }) {
   const hours = Number.isFinite(responseHours) && responseHours > 0 ? responseHours : 24;
   const due = `через ${hours} ч.`;
-  const first = exampleLetter(EXAMPLE_SUBJECT, EXAMPLE_FROM, "3 октября, 11:40", "Просим согласовать договор и вернуть подписанный скан до конца недели.", ["dogovor.pdf"]);
-  const second = exampleLetter("Счёт № 18 от 02.10.2026", "Павел Орлов <pavel@client.ru>", "3 октября, 12:05", "Направляем счёт на оплату. Просим подтвердить получение.", ["schet.pdf"]);
+  const limit = clampPreviewChars(previewChars);
+  const first = exampleLetter(EXAMPLE_SUBJECT, EXAMPLE_FROM, "3 октября, 11:40", "Просим согласовать договор и вернуть подписанный скан до конца недели.".slice(0, limit), ["dogovor.pdf"]);
+  const second = exampleLetter("Счёт № 18 от 02.10.2026", "Павел Орлов <pavel@client.ru>", "3 октября, 12:05", "Направляем счёт на оплату. Просим подтвердить получение.".slice(0, limit), ["schet.pdf"]);
   const text =
     grouping === "digest"
       ? formatBitrixDigest({

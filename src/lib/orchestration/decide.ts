@@ -2,7 +2,8 @@ import { DEFAULT_NOTICE_FIELDS, formatBitrixNotice, formatDueLabel, type NoticeL
 import type { WorkSchedule } from "@/lib/hours/schedule";
 import { planByWorkingHours, type OutsidePolicy } from "@/lib/hours/schedule";
 import type { NormalizedMessage } from "@/lib/mail/model";
-import { firstMatchingRule } from "@/lib/rules/engine";
+import { matchingRules } from "@/lib/rules/engine";
+import { clampPreviewChars } from "@/lib/rules/preview-chars";
 import type { RuleRecord } from "@/lib/rules/types";
 
 export type DecisionName = "exclude" | "notify" | "skipped_no_rule";
@@ -26,6 +27,17 @@ export type Decision = {
   notification: NotificationDraft | null;
 };
 
+export type PlannedNotification = {
+  rule: RuleRecord;
+  notification: NotificationDraft;
+};
+
+export type MessagePlan = {
+  decision: DecisionName;
+  rule: RuleRecord | null;
+  notifications: PlannedNotification[];
+};
+
 export type DecideContext = {
   now: Date;
   mailboxId: string;
@@ -40,17 +52,29 @@ export type DecideContext = {
     subjectPaused: boolean;
     domainPaused: boolean;
   };
-  previewChars: number;
   globalMessageDedupe: boolean;
 };
 
-export function decideMessage(message: NormalizedMessage, rules: RuleRecord[], ctx: DecideContext): Decision {
-  const rule = firstMatchingRule(rules, message);
-  if (!rule) return { decision: "skipped_no_rule", rule: null, notification: null };
-  if (rule.type === "exclude") return { decision: "exclude", rule, notification: null };
+export function planMessage(
+  message: NormalizedMessage,
+  rules: RuleRecord[],
+  ctx: DecideContext,
+  throttleFor?: (ruleId: string) => DecideContext["throttle"],
+): MessagePlan {
+  const matched = matchingRules(rules, message);
+  const notifications: PlannedNotification[] = [];
+  for (const rule of matched) {
+    if (!rule.action.notificationEnabled) continue;
+    const ruleCtx = throttleFor ? { ...ctx, throttle: throttleFor(rule.id) } : ctx;
+    notifications.push({ rule, notification: buildNotification(message, rule, ruleCtx) });
+  }
+  if (notifications.length === 0) return { decision: "skipped_no_rule", rule: null, notifications: [] };
+  return { decision: "notify", rule: notifications[0].rule, notifications };
+}
 
-  if (!rule.action.notificationEnabled) return { decision: "skipped_no_rule", rule, notification: null };
-  return { decision: "notify", rule, notification: buildNotification(message, rule, ctx) };
+export function decideMessage(message: NormalizedMessage, rules: RuleRecord[], ctx: DecideContext): Decision {
+  const plan = planMessage(message, rules, ctx);
+  return { decision: plan.decision, rule: plan.rule, notification: plan.notifications[0]?.notification ?? null };
 }
 
 function buildNotification(message: NormalizedMessage, rule: RuleRecord, ctx: DecideContext): NotificationDraft {
@@ -65,7 +89,7 @@ function buildNotification(message: NormalizedMessage, rule: RuleRecord, ctx: De
   const status: QueueStatus = throttled ? "throttled" : window.status === "cancelled" ? "cancelled" : window.status;
   const from = message.fromDisplayName ? `${message.fromDisplayName} <${message.fromEmail}>` : message.fromEmail;
   const fields = rule.action.noticeFields ?? DEFAULT_NOTICE_FIELDS;
-  const letter = noticeLetter(message, from, ctx.previewChars);
+  const letter = noticeLetter(message, from, rule.action.previewChars);
   if (!fields.includes("text")) letter.text = "";
   return {
     status,
@@ -110,7 +134,7 @@ function buildNotification(message: NormalizedMessage, rule: RuleRecord, ctx: De
 }
 
 function noticeLetter(message: NormalizedMessage, from: string, previewChars: number): NoticeLetter {
-  const limit = previewChars > 0 ? previewChars : 400;
+  const limit = clampPreviewChars(previewChars);
   const text = (message.bodyNewText || message.bodyFullText).replace(/\s+/g, " ").trim().slice(0, limit);
   const deadline = message.earliestDeadline ? formatDueLabel(new Date(message.earliestDeadline)) : "";
   return {

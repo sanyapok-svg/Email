@@ -38,17 +38,13 @@ export async function saveSettings(formData: FormData) {
       id: "default",
       b24Mode: String(formData.get("b24Mode") || "mock") === "webhook" ? "webhook" : "mock",
       webhookUrlEnc: webhook ? encryptSecret(webhook) : null,
-      retentionDays: optionalNumber(formData, "retentionDays"),
       notifyMaxAttempts: clamp(Number(formData.get("notifyMaxAttempts") || 5), 1, 10),
-      previewChars: clamp(Number(formData.get("previewChars") || 280), 40, 2000),
       globalMessageDedupe: formData.get("globalMessageDedupe") === "on",
     },
     update: {
       b24Mode: String(formData.get("b24Mode") || "mock") === "webhook" ? "webhook" : "mock",
       webhookUrlEnc: webhook ? encryptSecret(webhook) : current?.webhookUrlEnc,
-      retentionDays: optionalNumber(formData, "retentionDays"),
       notifyMaxAttempts: clamp(Number(formData.get("notifyMaxAttempts") || 5), 1, 10),
-      previewChars: clamp(Number(formData.get("previewChars") || 280), 40, 2000),
       globalMessageDedupe: formData.get("globalMessageDedupe") === "on",
     },
   });
@@ -180,13 +176,6 @@ async function stripSubstitute(tx: Pick<typeof prisma, "b24Recipient">, id: stri
 
 function userNotice(text: string): string {
   return withNotice("/b24-users", text);
-}
-
-function optionalNumber(formData: FormData, key: string): number | null {
-  const raw = String(formData.get(key) || "").trim();
-  if (!raw) return null;
-  const value = Number(raw);
-  return Number.isFinite(value) ? value : null;
 }
 
 function clamp(value: number, min: number, max: number): number {

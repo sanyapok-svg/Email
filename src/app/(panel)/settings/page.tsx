@@ -21,12 +21,6 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
           <input className="mt-1" type="password" name="webhookUrl" placeholder={config.webhookUrlEnc ? "сохранён, введите новый чтобы заменить" : "https://..."} />
         </label>
         <label className="flex items-center gap-2 text-sm"><input style={{ width: "auto" }} type="checkbox" name="globalMessageDedupe" defaultChecked={config.globalMessageDedupe} /> Дедупликация уведомлений по Message-ID</label>
-        <label className="text-sm">Символов превью
-          <input className="mt-1" name="previewChars" defaultValue={config.previewChars} />
-        </label>
-        <label className="text-sm">Срок хранения, дни. Пусто — не удалять
-          <input className="mt-1" name="retentionDays" defaultValue={config.retentionDays ?? ""} />
-        </label>
         <label className="text-sm">Попытки уведомления
           <input className="mt-1" name="notifyMaxAttempts" defaultValue={config.notifyMaxAttempts} />
         </label>

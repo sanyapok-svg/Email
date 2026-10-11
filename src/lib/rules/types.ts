@@ -54,13 +54,18 @@ export type RuleAction = {
   notifyOutsidePolicy?: "send_now" | "defer" | "cancel";
   noticeGrouping: NoticeGrouping;
   noticeFields: NoticeField[];
+  previewChars: number;
   noticeMetaOptional?: boolean;
+  forwardEnabled: boolean;
+  forwardSource: "address" | "employee";
+  forwardAddress: string;
+  forwardRecipientId: string;
 };
 
 export type RuleRecord = {
   id: string;
   name: string;
-  type: "exclude" | "notify";
+  type: "notify";
   position: number;
   active: boolean;
   category: string | null;
