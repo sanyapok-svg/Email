@@ -16,7 +16,7 @@ export default async function DashboardPage() {
   return (
     <>
       <PageTitle title="Обзор" text="Ящики, письма и уведомления в Битрикс24." />
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <Stat label="Активные ящики" value={mailboxes.filter((item) => item.active).length} />
         <Stat label="Исключено" value={decisionCount.exclude || 0} />
         <Stat label="Пропущено" value={decisionCount.skipped_no_rule || 0} />
@@ -26,7 +26,7 @@ export default async function DashboardPage() {
         <Stat label="Подавлено" value={noticeCount.throttled || 0} />
         <Stat label="Ошибки отправки" value={noticeCount.error || 0} />
       </div>
-      <div className="mt-6 overflow-x-auto rounded-xl border border-line">
+      <div className="mt-8 overflow-x-auto rounded-2xl border border-line bg-card shadow-[0_8px_28px_rgba(40,22,71,0.05)]">
         <table>
           <thead>
             <tr>
@@ -61,9 +61,11 @@ export default async function DashboardPage() {
           </tbody>
         </table>
       </div>
-      <Card>
-        <p className="text-sm text-muted">Решения писем: {Object.entries(decisionCount).map(([key, value]) => `${labelStatus(key)} ${value}`).join(", ") || "пока нет"}.</p>
-      </Card>
+      <div className="mt-4">
+        <Card>
+          <p className="text-sm text-muted">Решения писем: {Object.entries(decisionCount).map(([key, value]) => `${labelStatus(key)} ${value}`).join(", ") || "пока нет"}.</p>
+        </Card>
+      </div>
     </>
   );
 }
@@ -71,8 +73,8 @@ export default async function DashboardPage() {
 function Stat({ label, value }: { label: string; value: number }) {
   return (
     <Card>
-      <p className="text-xs uppercase tracking-wide text-muted">{label}</p>
-      <p className="mt-1 text-2xl font-semibold">{value}</p>
+      <p className="text-sm text-muted">{label}</p>
+      <p className="mt-2 text-4xl tracking-tight">{value}</p>
     </Card>
   );
 }

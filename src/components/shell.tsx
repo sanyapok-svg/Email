@@ -19,12 +19,12 @@ export function Shell({
   showAccounts?: boolean;
 }) {
   return (
-    <div className="min-h-screen md:grid md:grid-cols-[240px_minmax(0,1fr)]">
-      <aside className="sticky top-0 z-30 bg-pine text-paper md:flex md:h-screen md:flex-col md:overflow-y-auto">
-        <div className="flex items-center justify-between gap-3 px-4 py-3 md:block md:px-5 md:py-6">
+    <div className="min-h-screen bg-paper md:grid md:grid-cols-[240px_minmax(0,1fr)]">
+      <aside className="sticky top-0 z-30 bg-pine text-white md:flex md:h-screen md:flex-col md:overflow-y-auto">
+        <div className="flex items-center justify-between gap-3 px-4 py-3 md:block md:px-5 md:py-7">
           <div>
-            <p className="text-lg font-semibold leading-tight md:text-xl">Входящие</p>
-            {accountName ? <p className="text-sm text-white/80">{accountName}</p> : null}
+            <p className="text-lg font-medium tracking-tight md:text-2xl">Входящие</p>
+            {accountName ? <p className="mt-1 text-sm text-lilac">{accountName}</p> : null}
           </div>
           <form action={logout} className="md:hidden">
             <button className="secondary" type="submit">
@@ -44,7 +44,7 @@ export function Shell({
           </button>
         </form>
       </aside>
-      <main className="min-w-0 px-4 py-5 md:px-8 md:py-7">{children}</main>
+      <main className="min-w-0 px-4 py-6 md:px-10 md:py-10">{children}</main>
     </div>
   );
 }
@@ -53,21 +53,21 @@ export function PageTitle({ title, text, back }: { title: string; text?: string;
   return (
     <header className="mb-6">
       {back ? (
-        <Link className="mb-2 inline-block text-sm underline" href={back.href}>
+        <Link className="mb-3 inline-block text-sm" href={back.href}>
           {back.label}
         </Link>
       ) : null}
-      <h1 className="break-words text-xl font-semibold sm:text-2xl">{title}</h1>
-      {text ? <p className="mt-1 max-w-3xl break-words text-sm text-muted">{text}</p> : null}
+      <h1 className="break-words text-3xl tracking-tight sm:text-4xl">{title}</h1>
+      {text ? <p className="mt-2 max-w-3xl break-words text-base text-muted">{text}</p> : null}
     </header>
   );
 }
 
 export function Notice({ text }: { text?: string }) {
   if (!text) return null;
-  return <p className="mb-4 rounded-md border border-line bg-card px-3 py-2 text-sm">{text}</p>;
+  return <p className="mb-4 rounded-xl border border-lilac bg-white px-4 py-3 text-sm">{text}</p>;
 }
 
 export function Card({ children }: { children: React.ReactNode }) {
-  return <section className="rounded-xl border border-line bg-card p-4">{children}</section>;
+  return <section className="rounded-2xl border border-line bg-card p-5 shadow-[0_8px_28px_rgba(40,22,71,0.05)]">{children}</section>;
 }

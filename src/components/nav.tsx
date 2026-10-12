@@ -19,7 +19,7 @@ export function Nav({ pathname, showAccounts = false }: { pathname: string; show
           <a
             key={href}
             href={href}
-            className={`shrink-0 whitespace-nowrap rounded-md px-3 py-2 text-sm md:shrink ${active ? "bg-white/15 text-white" : "text-white/75 hover:bg-white/10"}`}
+            className={`shrink-0 whitespace-nowrap rounded-lg px-3 py-2 text-sm font-medium md:shrink ${active ? "bg-lilac text-pine" : "text-white/75 hover:bg-white/10"}`}
           >
             {label}
           </a>

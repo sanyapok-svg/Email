@@ -1,42 +1,62 @@
 @import "tailwindcss";
 
 @theme {
-  --color-paper: #f3efe6;
-  --color-ink: #1c1915;
-  --color-pine: #1b2822;
-  --color-moss: #2f6f4e;
-  --color-clay: #b85c38;
-  --color-card: #fffdf8;
-  --color-line: #e4d9c8;
-  --color-muted: #6d6458;
+  --color-paper: #f2f0eb;
+  --color-ink: #292827;
+  --color-pine: #281647;
+  --color-moss: #714cb6;
+  --color-lilac: #d4c7ff;
+  --color-clay: #8f3d4a;
+  --color-card: #ffffff;
+  --color-line: #e6e2da;
+  --color-muted: #6f6b66;
+  --color-soft: #f7f5f2;
 }
 
 body {
   background: var(--color-paper);
   color: var(--color-ink);
-  font-family: "Segoe UI", "PT Sans", "Helvetica Neue", sans-serif;
+  font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+  font-weight: 450;
+  letter-spacing: -0.011em;
+}
+
+h1, h2, h3 {
+  font-weight: 500;
+  letter-spacing: -0.035em;
+}
+
+main a:not(.button) {
+  color: var(--color-moss);
+  text-underline-offset: 0.15em;
+}
+
+input:focus, select:focus, textarea:focus {
+  outline: 2px solid var(--color-lilac);
+  border-color: var(--color-moss);
 }
 
 input, select, textarea {
   background: white;
   border: 1px solid var(--color-line);
-  border-radius: 0.5rem;
-  padding: 0.5rem 0.7rem;
+  border-radius: 0.75rem;
+  padding: 0.55rem 0.8rem;
   width: 100%;
 }
 
 button, .button {
-  background: var(--color-pine);
-  color: #f6f1e8;
-  border-radius: 0.55rem;
-  padding: 0.5rem 0.85rem;
+  background: var(--color-moss);
+  color: white;
+  border-radius: 0.75rem;
+  padding: 0.55rem 1rem;
   font-size: 0.92rem;
+  font-weight: 600;
 }
 
 button.secondary, .button.secondary {
   background: transparent;
-  color: var(--color-ink);
-  border: 1px solid var(--color-line);
+  color: var(--color-moss);
+  border: 1px solid var(--color-lilac);
 }
 
 .provider-grid {
@@ -76,7 +96,7 @@ button.provider {
 
 button.provider[aria-pressed="true"] {
   border-color: var(--color-moss);
-  background: #f3f7f4;
+  background: #f6f1ff;
   box-shadow: inset 0 0 0 1px var(--color-moss);
 }
 
@@ -97,7 +117,7 @@ button.switch .switch-track {
   width: 2.05rem;
   height: 1.15rem;
   border-radius: 999px;
-  background: #d7cec2;
+  background: #ddd8d2;
 }
 
 button.switch .switch-track::after {
@@ -138,7 +158,7 @@ button.weekday {
 
 button.weekday[aria-pressed="true"] {
   background: var(--color-moss);
-  color: #f6f1e8;
+  color: white;
   border-color: var(--color-moss);
 }
 
@@ -207,7 +227,7 @@ button.disclosure .summary {
 }
 
 button.disclosure:hover {
-  background: rgba(228, 217, 200, 0.55);
+  background: rgba(212, 199, 255, 0.35);
 }
 
 button.disclosure .chevron {
@@ -224,8 +244,8 @@ button.disclosure[aria-expanded="true"] .chevron {
 }
 
 aside button.secondary {
-  color: #f6f1e8;
-  border-color: rgba(246, 241, 232, 0.45);
+  color: #f4f1fb;
+  border-color: rgba(212, 199, 255, 0.45);
 }
 
 table {
@@ -243,9 +263,10 @@ th, td {
 }
 
 th {
-  font-size: 0.75rem;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+  font-size: 0.84rem;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
   color: var(--color-muted);
 }
 
@@ -254,7 +275,7 @@ th {
   font-weight: 500;
   letter-spacing: 0;
   text-transform: none;
-  color: #6d6458;
+  color: var(--color-muted);
 }
 
 .users-toolbar button {
@@ -263,14 +284,14 @@ th {
 
 button.bare {
   background: transparent;
-  color: #525c69;
+  color: var(--color-muted);
   border: 0;
   border-radius: 0.45rem;
   padding: 0.35rem;
 }
 
 button.bare:hover {
-  background: #f3efe6;
+  background: var(--color-paper);
 }
 
 button:disabled {
@@ -405,7 +426,7 @@ button:disabled {
 .date-days button.selected,
 .date-days button.selected:hover {
   background: var(--color-moss);
-  color: #f6f1e8;
+  color: white;
 }
 
 .date-today {
@@ -452,7 +473,7 @@ button:disabled {
 
 .holiday-calendar .date-days button.in-range,
 .holiday-calendar .date-days button.in-range:hover {
-  background: #e7f2eb;
+  background: #efe8fb;
   color: var(--color-ink);
   border-radius: 0;
 }
@@ -460,14 +481,14 @@ button:disabled {
 .holiday-calendar .date-days button.range-start,
 .holiday-calendar .date-days button.range-start:hover {
   background: var(--color-moss);
-  color: #f6f1e8;
+  color: white;
   border-radius: 999px 0 0 999px;
 }
 
 .holiday-calendar .date-days button.range-end,
 .holiday-calendar .date-days button.range-end:hover {
   background: var(--color-moss);
-  color: #f6f1e8;
+  color: white;
   border-radius: 0 999px 999px 0;
 }
 
@@ -476,7 +497,7 @@ button:disabled {
 .holiday-calendar .date-days button.pending,
 .holiday-calendar .date-days button.pending:hover {
   background: var(--color-moss);
-  color: #f6f1e8;
+  color: white;
   border-radius: 999px;
 }
 
@@ -488,13 +509,13 @@ button:disabled {
   margin-top: 0.75rem;
   padding: 0.65rem 0.75rem;
   border-radius: 0.6rem;
-  background: #e7f2eb;
+  background: #efe8fb;
   font-size: 0.92rem;
 }
 
 .holiday-calendar .holiday-confirm button.holiday-save {
-  background: var(--color-pine);
-  color: #f6f1e8;
+  background: var(--color-moss);
+  color: white;
   border-radius: 0.55rem;
   padding: 0.45rem 0.8rem;
   font-size: 0.92rem;
