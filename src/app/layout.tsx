@@ -5,8 +5,8 @@ import "./globals.css";
 startMailboxScheduler();
 
 export const metadata: Metadata = {
-  title: "Входящие",
-  description: "Обработка входящей почты и уведомления в Битрикс24",
+  title: "Почтаход",
+  description: "Из общего ящика — в нужные руки. Разбор почты и уведомления в Битрикс24, Telegram и пересылку.",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

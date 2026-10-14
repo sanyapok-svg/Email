@@ -1,4 +1,5 @@
 import { headers } from "next/headers";
+import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { after } from "next/server";
 import { Shell } from "@/components/shell";
@@ -7,6 +8,10 @@ import { logEvent } from "@/lib/log";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
+export const metadata: Metadata = {
+  title: "Входящие",
+  description: "Обработка входящей почты и уведомления в Битрикс24",
+};
 
 export default async function PanelLayout({ children }: { children: React.ReactNode }) {
   const { user, account, accounts } = await loadPanel();

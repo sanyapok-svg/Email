@@ -9,7 +9,7 @@ export async function ensureBootstrapUser() {
   if (!login || !password) return;
   try {
     await prisma.serviceUser.create({
-      data: { login, name: "Администратор", passwordHash: hashPassword(password), active: true, isSuperAdmin: true },
+      data: { login, name: "Администратор", passwordHash: hashPassword(password), active: true, isSuperAdmin: true, emailVerifiedAt: new Date() },
     });
   } catch {
     // A parallel request may have created the first user.
